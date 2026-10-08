@@ -1,0 +1,36 @@
+{
+  "name": "@maxlabs/cli",
+  "version": "0.1.0",
+  "description": "OAuth-first MaxLabs coding agent for your terminal",
+  "type": "module",
+  "bin": {
+    "maxlabs": "bin/maxlabs.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node --disable-warning=ExperimentalWarning scripts/build.mjs",
+    "prepack": "npm run build",
+    "start": "npm run build --silent && node bin/maxlabs.js",
+    "preview": "npm run build --silent && node bin/maxlabs.js --demo",
+    "test": "node --test test/*.test.ts"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "keywords": [
+    "maxlabs",
+    "cli",
+    "coding-agent",
+    "ai"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
