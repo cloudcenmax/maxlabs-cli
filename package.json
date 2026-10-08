@@ -28,6 +28,14 @@
     "coding-agent",
     "ai"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cloudcenmax/maxlabs-cli.git"
+  },
+  "homepage": "https://github.com/cloudcenmax/maxlabs-cli#readme",
+  "bugs": {
+    "url": "https://github.com/cloudcenmax/maxlabs-cli/issues"
+  },
   "license": "MIT",
   "publishConfig": {
     "access": "public",

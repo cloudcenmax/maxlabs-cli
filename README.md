@@ -27,6 +27,10 @@ conversation so personal context cannot cross into a work request. `/logout`
 clears every saved OAuth context. Set `MAXLABS_API_KEY` and `MAXLABS_BASE_URL`
 when an API-key fallback is needed. Common options include:
 
+Production defaults to `https://console.maxlabs.cenmax.in` for OAuth and
+`https://api.maxlabs.cenmax.in/v1` for API requests. Both remain overridable
+with `MAXLABS_AUTH_URL` and `MAXLABS_BASE_URL` for development and testing.
+
 ```bash
 maxlabs --workspace . --model auto --auto
 maxlabs --prompt "review this change" --web-search auto
