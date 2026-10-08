@@ -9,14 +9,14 @@ package. It contains no native binary, installer, or platform-specific `.exe`.
 Node.js 22.13 or newer is required.
 
 ```bash
-npm install --global @maxlabs/cli
+npm install --global maxlabs
 maxlabs
 ```
 
 Run it without a global installation with:
 
 ```bash
-npx @maxlabs/cli
+npx maxlabs
 ```
 
 OAuth is attempted first. Personal and work sessions are stored separately in

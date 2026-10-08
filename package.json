@@ -1,5 +1,5 @@
 {
-  "name": "@maxlabs/cli",
+  "name": "maxlabs",
   "version": "0.1.0",
   "description": "OAuth-first MaxLabs coding agent for your terminal",
   "type": "module",
