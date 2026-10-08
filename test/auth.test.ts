@@ -157,6 +157,29 @@ test("a revoked active work session cannot lock the user out of a stored persona
   globalThis.fetch = async () => Response.json({ error: "invalid_grant" }, { status: 400 });
 
   const oauth = new OAuthSession("https://gateway.test", path);
-  assert.equal((await oauth.switchAccount("personal")).id, "personal");
   assert.equal(await oauth.accessToken(), "personal-token");
+  const saved = JSON.parse(await readFile(path, "utf8"));
+  assert.equal(saved.active_account_id, "personal");
+  assert.equal(saved.accounts["organization:7"], undefined);
+});
+
+test("an invalid refresh grant clears the unusable session so login can restart", async (t) => {
+  const path = await storePath();
+  const expired = record("personal", "Personal", "expired-token");
+  expired.tokens.expires_at = "2000-01-01T00:00:00.000Z";
+  await writeFile(path, JSON.stringify({
+    version: 2,
+    active_account_id: "personal",
+    accounts: { personal: expired },
+  }));
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async () => Response.json({ error: "invalid_grant" }, { status: 400 });
+
+  const oauth = new OAuthSession("https://gateway.test", path);
+  assert.equal(await oauth.signedIn(), true);
+  assert.equal(await oauth.accessToken(), undefined);
+  assert.equal(await oauth.signedIn(), false);
+  const saved = JSON.parse(await readFile(path, "utf8"));
+  assert.deepEqual(saved.accounts, {});
 });

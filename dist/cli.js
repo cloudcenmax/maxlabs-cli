@@ -147,8 +147,15 @@ async function main()                {
     process.stdout.write(`\n${ui.modeNotice(guard.mode)}\n`);
   };
 
-  if (!(await oauth.signedIn()) && options.oauthLogin) {
-    try { await oauth.login(process.stderr); }
+  if (options.oauthLogin) {
+    const hadSavedSession = await oauth.signedIn();
+    try {
+      const token = hadSavedSession ? await oauth.accessToken() : undefined;
+      if (!token) {
+        if (hadSavedSession) process.stderr.write("Your saved OAuth session has expired. Sign in again to continue.\n");
+        await oauth.login(process.stderr);
+      }
+    }
     catch (error) {
       if (!options.apiKey) throw error;
       process.stderr.write(`OAuth unavailable; using API key fallback: ${messageOf(error)}\n`);

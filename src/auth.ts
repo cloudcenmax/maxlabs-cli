@@ -177,11 +177,24 @@ export class OAuthSession {
     if (record.tokens.access_token && expiresAt > Date.now() + 60_000) return record.tokens.access_token;
     if (!record.tokens.refresh_token) return undefined;
 
-    const tokens = await this.#exchange(new URLSearchParams({
-      grant_type: "refresh_token",
-      client_id: "cli",
-      refresh_token: record.tokens.refresh_token,
-    }), signal);
+    let tokens: Tokens;
+    try {
+      tokens = await this.#exchange(new URLSearchParams({
+        grant_type: "refresh_token",
+        client_id: "cli",
+        refresh_token: record.tokens.refresh_token,
+      }), signal);
+    } catch (error) {
+      if (!(error instanceof OAuthRefreshError) || error.code !== "invalid_grant") throw error;
+      // A revoked or already-rotated refresh token cannot recover. Forget only
+      // its owner, then use another connected account when one is available.
+      delete this.#store.accounts[accountId];
+      if (this.#store.active_account_id === accountId) {
+        this.#store.active_account_id = Object.keys(this.#store.accounts)[0];
+      }
+      await this.#persist();
+      return this.accessToken(signal);
+    }
     // Save against the owner of the rotating refresh token, even if selection
     // changed while the network request was in flight.
     if (this.#store.accounts[accountId]) this.#store.accounts[accountId].tokens = tokens;
@@ -262,7 +275,7 @@ export class OAuthSession {
       signal,
     });
     const payload = await response.json() as Record<string, unknown>;
-    if (!response.ok || payload.error) throw new Error(`OAuth refresh failed: ${payload.error || response.status}`);
+    if (!response.ok || payload.error) throw new OAuthRefreshError(String(payload.error || response.status));
     return normaliseTokens(payload);
   }
 
@@ -301,6 +314,15 @@ export class OAuthSession {
     await writeFile(temporary, `${JSON.stringify(this.#store)}\n`, { mode: 0o600 });
     await chmod(temporary, 0o600);
     await rename(temporary, this.storePath);
+  }
+}
+
+class OAuthRefreshError extends Error {
+  readonly code: string;
+
+  constructor(code: string) {
+    super(`OAuth refresh failed: ${code}`);
+    this.code = code;
   }
 }
 

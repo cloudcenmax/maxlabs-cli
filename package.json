@@ -1,6 +1,6 @@
 {
   "name": "maxlabs",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OAuth-first MaxLabs coding agent for your terminal",
   "type": "module",
   "bin": {
