@@ -13,6 +13,12 @@ import (
 // approval path. Only checked output destinations are removed for assessment.
 var workerShellTokens = regexp.MustCompile(`(?:"[^"\\]*"|'[^'\\]*'|[^\s'"|&;<>\\])+|&&|\|\||&>|>>|>&|[|;>\n]`)
 var workerPrivatePart = regexp.MustCompile(`(?i)^(?:\.aws|\.ssh|\.npmrc|\.netrc|\.pypirc|\.git-credentials|auth\.json|credentials\.json|service-account\.json)$`)
+
+type workerAssessmentRange struct {
+	start, end  int
+	replacement string
+}
+
 var descriptor = regexp.MustCompile(`^\d+$`)
 
 func workerShellWord(raw string) string {
@@ -100,7 +106,7 @@ func workerAutoCommand(root, command string) (string, bool) {
 	if strings.TrimSpace(command[consumed:]) != "" {
 		return "", false
 	}
-	ranges := [][2]int{}
+	ranges := []workerAssessmentRange{}
 	if len(parts) >= 3 && workerShellWord(command[parts[0][0]:parts[0][1]]) == "cd" && command[parts[2][0]:parts[2][1]] == "&&" {
 		canonical, e := filepath.EvalSymlinks(root)
 		destination := workerShellWord(command[parts[1][0]:parts[1][1]])
@@ -109,7 +115,7 @@ func workerAutoCommand(root, command string) (string, bool) {
 		}
 		path, e2 := filepath.EvalSymlinks(destination)
 		if e == nil && e2 == nil && path == canonical {
-			ranges = append(ranges, [2]int{parts[0][0], parts[2][1]})
+			ranges = append(ranges, workerAssessmentRange{parts[0][0], parts[2][1], " "})
 		}
 	}
 	for i := 0; i < len(parts); i++ {
@@ -138,7 +144,7 @@ func workerAutoCommand(root, command string) (string, bool) {
 				start = previous[0]
 			}
 		}
-		ranges = append(ranges, [2]int{start, next[1]})
+		ranges = append(ranges, workerAssessmentRange{start, next[1], " "})
 	}
 	// Allow only the literal environment-template copy; never overwrite a
 	// previously configured worker environment without an explicit review.
@@ -185,17 +191,54 @@ func workerAutoCommand(root, command string) (string, bool) {
 		if e != nil && !os.IsNotExist(e) {
 			continue
 		}
-		ranges = append(ranges, [2]int{part[0], parts[j+1][1]})
+		ranges = append(ranges, workerAssessmentRange{part[0], parts[j+1][1], "true"})
 	}
-	sort.Slice(ranges, func(i, j int) bool { return ranges[i][0] < ranges[j][0] })
+	// ls/stat reveal metadata, not the values stored in a private environment.
+	metadata := false
+	for i, part := range parts {
+		raw := command[part[0]:part[1]]
+		if raw == "&&" || raw == "||" || raw == ";" || raw == "|" || raw == "\n" {
+			metadata = false
+			continue
+		}
+		previous := ""
+		if i > 0 {
+			previous = command[parts[i-1][0]:parts[i-1][1]]
+		}
+		commandStart := i == 0 || previous == "&&" || previous == "||" || previous == ";" || previous == "|" || previous == "\n"
+		if commandStart {
+			name := workerShellWord(raw)
+			metadata = name == "ls" || name == "stat"
+		}
+		value := workerShellWord(raw)
+		covered := false
+		for _, r := range ranges {
+			if part[0] >= r.start && part[1] <= r.end {
+				covered = true
+				break
+			}
+		}
+		if covered {
+			continue
+		}
+		if !commandStart && !strings.Contains(value, "=") && filepath.Base(value) == ".env.example" {
+			if path, e := SafeWorkerPath(root, value); e == nil && filepath.Base(path) == ".env.example" {
+				ranges = append(ranges, workerAssessmentRange{part[0], part[1], "worker-env-template"})
+				continue
+			}
+		}
+		if commandStart || !metadata || strings.HasPrefix(value, "-") {
+			continue
+		}
+		if _, e := SafePath(root, value); e == nil {
+			ranges = append(ranges, workerAssessmentRange{part[0], part[1], "worker-local-metadata"})
+		}
+	}
+	sort.Slice(ranges, func(i, j int) bool { return ranges[i].start < ranges[j].start })
 	assessed := command
 	for i := len(ranges) - 1; i >= 0; i-- {
 		r := ranges[i]
-		replacement := " "
-		if strings.HasPrefix(command[r[0]:r[1]], "cp") {
-			replacement = "true"
-		}
-		assessed = assessed[:r[0]] + replacement + assessed[r[1]:]
+		assessed = assessed[:r.start] + r.replacement + assessed[r.end:]
 	}
 	assessed = strings.TrimSpace(assessed)
 	return assessed, assessed != ""

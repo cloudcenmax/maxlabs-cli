@@ -1,6 +1,7 @@
 package greenfield
 
 import (
+	"censi/harness/internal/tools"
 	"context"
 	"encoding/json"
 	"os"
@@ -54,5 +55,33 @@ func TestWorkerTemplateCopyDoesNotOverwriteExistingEnvironment(t *testing.T) {
 	command, ok := workerAutoCommand(root, "cp -n .env.example .env")
 	if !ok || command != "true" {
 		t.Fatal(command, ok)
+	}
+}
+
+func TestReportedInspectionCommandRunsWithoutApproval(t *testing.T) {
+	s, e := NewStore(t.TempDir())
+	if e != nil {
+		t.Fatal(e)
+	}
+	root := s.Root
+	_ = os.MkdirAll(filepath.Join(root, "tests", "Feature"), 0755)
+	_ = os.WriteFile(filepath.Join(root, ".env"), []byte("DO_NOT_PRINT_ENV_VALUE"), 0600)
+	for _, name := range []string{"SeatsAndInvitesTest.php", "SeatBillingTest.php"} {
+		_ = os.WriteFile(filepath.Join(root, "tests", "Feature", name), []byte("<?php // seat test fixture"), 0600)
+	}
+	command := "ls -la .env 2>/dev/null; ls tests; cat tests/Feature/SeatsAndInvitesTest.php tests/Feature/SeatBillingTest.php | head -200"
+	args, _ := json.Marshal(map[string]string{"command": command})
+	g := &flexibleGuard{root: root}
+	reason, e := g.Permit(context.Background(), "bash", args, false, nil)
+	if e != nil || reason != "" {
+		t.Fatal(e, reason)
+	}
+	workspace, e := tools.NewWorkspace(root)
+	if e != nil {
+		t.Fatal(e)
+	}
+	result, e := tools.NewBashTool(workspace).Execute(context.Background(), args)
+	if e != nil || result.IsError || !strings.Contains(resultText(result), "seat test fixture") || strings.Contains(resultText(result), "DO_NOT_PRINT_ENV_VALUE") {
+		t.Fatal(e, resultText(result))
 	}
 }

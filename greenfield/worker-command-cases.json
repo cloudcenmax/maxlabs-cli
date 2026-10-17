@@ -134,5 +134,61 @@
   {
     "command": "cp .env .env.example",
     "auto": false
+  },
+  {
+    "command": "ls -la .env 2>/dev/null; ls tests; cat tests/Feature/SeatsAndInvitesTest.php tests/Feature/SeatBillingTest.php | head -200",
+    "auto": true
+  },
+  {
+    "command": "ls -la .env 2>/dev/null",
+    "auto": true
+  },
+  {
+    "command": "stat .env 2>/dev/null; php artisan test 2>&1",
+    "auto": true
+  },
+  {
+    "command": "ls -la .env; cat .env",
+    "auto": false
+  },
+  {
+    "command": "ls -la .env; rm -rf src",
+    "auto": false
+  },
+  {
+    "command": "ls -la /etc/.env 2>/dev/null",
+    "auto": false
+  },
+  {
+    "command": "cat .env.example",
+    "auto": true
+  },
+  {
+    "command": "grep DB_CONNECTION .env.example",
+    "auto": true
+  },
+  {
+    "command": "cat /etc/.env.example",
+    "auto": false
+  },
+  {
+    "command": "APP_FILE=.env.example rm -rf src",
+    "auto": false
+  },
+  {
+    "command": "cat .env.example && cat .env",
+    "auto": false
+  },
+  {
+    "command": "ls .env 2>/dev/null; php artisan test --filter=SeatsAndInvitesTest 2>&1 | tail -20",
+    "auto": true
+  },
+  {
+    "command": "ls -la credentials.json .npmrc 2>/dev/null; stat .env",
+    "auto": true
+  },
+  {
+    "command": "ls .npmrc 2>/dev/null; cat .npmrc",
+    "auto": false
   }
 ]

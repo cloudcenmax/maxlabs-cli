@@ -91,6 +91,7 @@ export function freshApprovalRisk(tool        , arguments_                      
   if (tool !== "bash") return tool === "webfetch" ? "reaches the network" : undefined;
   const command = String(arguments_.command || "").trim();
   if (!command) return "empty command";
+  if (/\.env\b|\.aws(?:[\/\s]|$)|\.ssh(?:[\/\s]|$)|\.(?:npmrc|netrc|pypirc)\b/.test(command)) return "accesses private environment or credential files";
   if (command.includes("$(`") || command.includes("$(") || command.includes("`")) return "contains hidden command substitution";
   if (hasUnsafeWriteRedirect(command)) return "redirects output to a file";
   if (/(^|[;&|]\s*)cd\s+(?:\/|~|\.\.)/.test(command)) return "changes outside the working directory before continuing";

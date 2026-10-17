@@ -46,13 +46,13 @@ export async function workerAutoCommand(root        , command        )          
     consumed = part.index  + part[0].length;
   }
   if (command.slice(consumed).trim()) return undefined;
-  const ranges                          = [];
+  const ranges                                  = [];
   // Models often repeat their assigned cwd. It must not look like an escape
   // merely because the runner worktree lives under an absolute metadata path.
   if (parts.length >= 3 && word(parts[0][0]) === 'cd' && parts[2][0] === '&&') {
     try {
       const workspace = await Workspace.open(root);
-      if (await realpath(resolve(root, word(parts[1][0]))) === workspace.root) ranges.push([parts[0].index , parts[2].index  + 2]);
+      if (await realpath(resolve(root, word(parts[1][0]))) === workspace.root) ranges.push([parts[0].index , parts[2].index  + 2, " "]);
     } catch { /* Other directory changes retain ordinary review. */ }
   }
   for (let i = 0; i < parts.length; i++) {
@@ -66,7 +66,7 @@ export async function workerAutoCommand(root        , command        )          
     let start = token.index ;
     const previous = parts[i - 2];
     if (previous && /^\d+$/.test(previous[0]) && previous.index  + previous[0].length === start) start = previous.index ;
-    ranges.push([start, next.index  + next[0].length]);
+    ranges.push([start, next.index  + next[0].length, " "]);
   }
   // Bootstrapping a private worker copy from its non-secret template is normal
   // setup. Existing environment files are preserved unless cp explicitly uses -n.
@@ -82,12 +82,36 @@ export async function workerAutoCommand(root        , command        )          
       if (!(await stat(template)).isFile() || !safeTaskPath(relative(ws.root,template))) continue;
       try { const existing=await lstat(resolve(ws.root,'.env')); if (!preserve || !existing.isFile()) continue; }
       catch(error) { if ((error                         ).code !== 'ENOENT') continue; }
-      ranges.push([parts[i].index ,parts[j+1].index +parts[j+1][0].length]);
+      ranges.push([parts[i].index ,parts[j+1].index +parts[j+1][0].length, "true"]);
     } catch { /* A missing or unsafe template retains normal review. */ }
+  }
+  // File metadata is not file content. Listing/statting the worker's .env
+  // must not inherit the approval rule for reading its secret values.
+  let metadata = false;
+  for (const [index, part] of parts.entries()) {
+    if (['&&', '||', ';', '|', '\n'].includes(part[0])) { metadata = false; continue; }
+    const previous = parts[index-1];
+    const commandStart = !previous || ['&&', '||', ';', '|', '\n'].includes(previous[0]);
+    if (commandStart) metadata = ['ls', 'stat'].includes(word(part[0]));
+    const value = word(part[0]);
+    if (ranges.some(([start,end])=>part.index >=start && part.index +part[0].length<=end)) continue;
+    if (!commandStart && !value.includes('=') && /(?:^|\/)\.env\.example$/.test(value)) {
+      try {
+        const ws=await Workspace.open(root),path=await ws.path(value,true);
+        const rel=relative(ws.root,path);
+        if (safeTaskPath(rel) && /(?:^|\/)\.env\.example$/.test(rel)) { ranges.push([part.index ,part.index +part[0].length,'worker-env-template']); continue; }
+      } catch { /* Templates in other folders keep ordinary review. */ }
+    }
+    if (commandStart || !metadata || value.startsWith('-')) continue;
+    try {
+      const ws = await Workspace.open(root);
+      await ws.path(value, true);
+      ranges.push([part.index ,part.index +part[0].length, "worker-local-metadata"]);
+    } catch { /* Outside metadata remains a separate operation to review. */ }
   }
   ranges.sort((a,b)=>a[0]-b[0]);
   let assessed = command;
-  for (const [start, end] of ranges.reverse()) assessed = assessed.slice(0, start) + (command.slice(start,end).startsWith('cp') ? 'true' : ' ') + assessed.slice(end);
+  for (const [start, end, replacement] of ranges.reverse()) assessed = assessed.slice(0, start) + replacement + assessed.slice(end);
   return assessed.trim() || undefined;
 }
 
