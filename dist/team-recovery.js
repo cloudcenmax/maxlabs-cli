@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { applicationChangeSummary } from './team-context.js';
 import { Agent } from './agent.js';
 
 import { SessionLog, SteeringQueue } from './session.js';
@@ -10,7 +11,7 @@ import { FlexiblePermissions } from './team-flexible.js';
 
 
 
-import { sourceFiles, workerEnvironment, git } from './team-workspace.js';
+import { sourceFiles, workerEnvironment } from './team-workspace.js';
 
 
 
@@ -47,7 +48,7 @@ export async function recoverBudgetTask(store          ,child          ,id      
   const task=await store.content(state.artifacts.find(a=>a.kind==='task'&&a.id===id) ),briefs=[];
   for(const a of state.artifacts)if(['brief','spec'].includes(a.kind))briefs.push({kind:a.kind,content:await store.content(a)});
   const recovery         ={plan:{action:'blocked',summary:'Diagnosis incomplete',next_steps:[]},source_hash:before,checks:[],usage:{input_tokens:0,cached_input_tokens:0,output_tokens:0,reasoning_tokens:0,calls:0},archive:`.maxlabs/team/recovery/${id}-${run.id}-${randomUUID()}.json`};
-  const packet={task,briefs,workspace:root,branch:run.branch,prior_summary:run.output.slice(0,4000),recent_actions:run.recent_actions,checks:run.checks.slice(-3).map(c=>({...c,output:c.output.slice(0,2400)})),change_summary:await git(root,['diff','--stat',state.execution.base_commit,'HEAD'],signal),attempt:run.attempts};
+  const packet={task,briefs,workspace:root,branch:run.branch,prior_summary:run.output.slice(0,4000),recent_actions:run.recent_actions,checks:run.checks.slice(-3).map(c=>({...c,output:c.output.slice(0,2400)})),change_summary:await applicationChangeSummary(root,state.execution.base_commit,signal),attempt:run.attempts};
   const prompt=JSON.stringify(packet);if(prompt.length>64000)throw new Error('Recovery context exceeds budget; refine the task before continuing');
   const record=async(command       ,result           )=>{const log=`.maxlabs/team/checks/recovery-${id}-${run.id}-${randomUUID()}.log`,target=await store.path(log.slice('.maxlabs/team/'.length),true);await mkdir(dirname(target),{recursive:true});await writeFile(target,result.text.slice(0,200000),{mode:0o600});recovery.checks.push({command,passed:!result.isError,output:excerpt(result.text.replaceAll(root,'.')),log});};
   const result=await child(prompt,'recovery',{...task,_execution_path:run.workspace,_recordVerification:record,_recordUsage:(usage                  )=>{recovery.usage=usage;}},signal);

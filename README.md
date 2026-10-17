@@ -480,6 +480,12 @@ batch (four model calls each), and eight worker starts per batch. Unresolved wor
 then stops with a reviewable handoff; it cannot retry indefinitely. Diagnoses and
 their token usage are saved separately from worker acceptance evidence.
 
+Worker handoffs use bounded source-change summaries and compact check evidence.
+Dependency trees and generated runtime files stay out of the change summary.
+Workers can use the read-only `team_context` tool to page through the original
+artifacts, run reports, and recorded check output using supplied context keys.
+The approved task and specification remain intact in the handoff.
+
 Source snapshots exclude local secrets and dependency trees. Workers record real
 verification through `verify`; a completion report alone cannot pass.
 After repairing failures, mark the comprehensive acceptance run `final: true`

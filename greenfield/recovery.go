@@ -209,7 +209,7 @@ func (r *Runtime) recoverBudgetTask(ctx context.Context, id string) error {
 		if len(checks) > 3 {
 			checks = checks[len(checks)-3:]
 		}
-		diff, _ := gitCommand(ctx, root, "diff", "--stat", state.Execution.BaseCommit, "HEAD")
+		diff, _ := applicationChangeSummary(ctx, root, state.Execution.BaseCommit)
 		packet := map[string]any{"task": task, "briefs": briefs, "workspace": root, "branch": run.Branch, "prior_summary": truncate(run.Output, 4000), "recent_actions": run.RecentActions, "checks": checks, "change_summary": diff, "attempt": run.Attempts}
 		raw, _ := json.Marshal(packet)
 		if len(raw) > 64000 {

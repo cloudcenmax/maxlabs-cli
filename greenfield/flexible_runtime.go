@@ -111,6 +111,7 @@ type flexibleJob struct {
 	task                         map[string]any
 	run                          *Run
 	packet                       map[string]any
+	contextSources               map[string]string
 }
 
 func (r *Runtime) runFlexible(ctx context.Context, id string) (tools.Result, error) {
@@ -178,11 +179,14 @@ func (r *Runtime) runFlexibleWave(ctx context.Context, ids []string) (tools.Resu
 		briefs := []map[string]any{}
 		tasks := map[string]map[string]any{}
 		evidence := map[string]any{}
+		contextSources := map[string]string{}
 		for _, a := range state.Artifacts {
 			d, err := r.Store.Content(a)
 			if err != nil {
 				return err
 			}
+			rawContext, _ := json.Marshal(d)
+			contextSources["artifact/"+a.Kind+"/"+a.ID] = string(rawContext)
 			if a.Kind == "task" {
 				tasks[a.ID] = d
 			}
@@ -192,12 +196,20 @@ func (r *Runtime) runFlexibleWave(ctx context.Context, ids []string) (tools.Resu
 			}
 		}
 		for id, previous := range state.Runs {
-			checks := []Check{}
-			for _, check := range previous.Checks {
-				check.Output = truncate(check.Output, 1600)
-				checks = append(checks, check)
+			rawContext, _ := json.Marshal(previous)
+			contextSources["run/"+id] = string(rawContext)
+			for ci, check := range previous.Checks {
+				rawCheck, _ := json.Marshal(check)
+				contextSources[fmt.Sprintf("check/%s/%d", id, ci)] = string(rawCheck)
 			}
-			evidence[id] = map[string]any{"status": previous.Status, "summary": truncate(previous.Output, 1000), "checks": checks, "branch": previous.Branch, "stop_reason": previous.StopReason, "steps_used": previous.StepsUsed}
+			checks := compactChecks(previous.Checks)
+			if previous.Status == "passed" && len(checks) > 0 {
+				checks = checks[len(checks)-1:]
+			}
+			for i := range checks {
+				checks[i].Command = truncate(checks[i].Command, 256)
+			}
+			evidence[id] = map[string]any{"status": previous.Status, "summary": truncate(previous.Output, 240), "checks": checks, "check_count": len(previous.Checks), "context_key": "run/" + id, "check_context_prefix": "check/" + id + "/", "branch": previous.Branch, "stop_reason": previous.StopReason, "steps_used": previous.StepsUsed}
 		}
 		for _, id := range ids {
 			task := tasks[id]
@@ -254,7 +266,7 @@ func (r *Runtime) runFlexibleWave(ctx context.Context, ids []string) (tools.Resu
 			} else if _, err = gitCommand(ctx, integration, "worktree", "add", "-b", branch, root, base); err != nil {
 				return err
 			}
-			packet := map[string]any{"task": task, "briefs": briefs, "workspace": root, "branch": branch, "implementation_evidence": evidence}
+			packet := map[string]any{"task": task, "briefs": briefs, "workspace": root, "branch": branch, "implementation_evidence": evidence, "context_index": contextIndex(contextSources)}
 			if previous != nil {
 				prior := map[string]any{}
 				for key, value := range evidence[id].(map[string]any) {
@@ -274,13 +286,16 @@ func (r *Runtime) runFlexibleWave(ctx context.Context, ids []string) (tools.Resu
 				}
 			}
 			if text(task, "role") == "qa" {
-				diff, _ := gitCommand(ctx, root, "diff", "--stat", state.Execution.BaseCommit, "HEAD")
+				diff, summaryErr := applicationChangeSummary(ctx, root, state.Execution.BaseCommit)
+				if summaryErr != nil {
+					return summaryErr
+				}
 				packet["change_summary"] = diff
 			}
 			run.Branch = branch
 			run.Workspace = relative
 			state.Runs[id] = run
-			jobs = append(jobs, flexibleJob{id: id, root: root, branch: branch, baseCommit: state.Execution.BaseCommit, task: task, run: run, packet: packet})
+			jobs = append(jobs, flexibleJob{id: id, root: root, branch: branch, baseCommit: state.Execution.BaseCommit, task: task, run: run, packet: packet, contextSources: contextSources})
 		}
 		r.workersUsed += len(jobs)
 		delete(state.Approvals, "release")
@@ -391,7 +406,7 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 		}
 		return err
 	}}
-	available = append(available, verify)
+	available = append(available, verify, cachedContextTool{sources: job.contextSources})
 	for _, tool := range available {
 		if err = registry.Register(tool); err != nil {
 			return run, err
@@ -442,7 +457,7 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 	})
 	instruction := "Deliver the supplied outcomes in this isolated Git working branch. Inspect the actual repository and project instructions. You choose files, implementation, dependency installation, and shell commands; listed read/write/check paths are suggestions, not a file allowlist. Use the approved stack and decisions; when prose conflicts, the approved specification wins. Scaffold using official tools in staging if an existing partial project prevents an in-place generator; preserve useful existing work. You may investigate and repair test failures within this task. After repairs, use verify with final:true for comprehensive task acceptance; chain required commands with && so any failure is reported. Do not publish, deploy, change workflow metadata, or access other projects. Use verify for real outcome checks; its output is recorded by the runner. Keep test logs/reports in the system temporary directory or .cache so they do not alter delivery source. If the project uses .env, initialize it with cp -n .env.example .env rather than overwriting existing configuration; never print its contents. Finish ONLY with JSON {\"outcome\":\"completed\" or \"blocked\",\"summary\":\"...\",\"blockers\":[]}. A completed report without recorded passing verification is blocked."
 	if qa {
-		instruction = "Independently verify the supplied outcomes. Inspect the actual diff and source, look for regressions, missing behavior, weakened tests, and contradictory evidence. Run your own checks with verify; do not merely trust implementation reports. Do not edit application source. Finish ONLY with JSON {\"outcome\":\"completed\" or \"blocked\",\"summary\":\"...\",\"blockers\":[]}. Report concrete gaps, not assumed success.\n" + instruction
+		instruction = "Independently verify the supplied outcomes. Use team_context with context_index keys for detailed prior reports and checks. The change summary is a bounded navigation aid, not verification evidence. Inspect the actual diff and source, look for regressions, missing behavior, weakened tests, and contradictory evidence. Run your own checks with verify; do not merely trust implementation reports. Do not edit application source. Finish ONLY with JSON {\"outcome\":\"completed\" or \"blocked\",\"summary\":\"...\",\"blockers\":[]}. Report concrete gaps, not assumed success.\n" + instruction
 	}
 	instruction += fmt.Sprintf(" Your budget is %d model steps; reserve the final steps for verification and a handoff. Fresh worktrees omit installed dependencies; install from the project manifests before testing. Verification output is already bounded: prefer unpiped checks, avoid head (which may interrupt the test), and rerun any failed check after repairs.", limit)
 	turn, runErr := worker.Run(ctx, instruction+"\n\n"+string(encoded))
