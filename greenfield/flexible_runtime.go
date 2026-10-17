@@ -117,6 +117,21 @@ func (r *Runtime) runFlexible(ctx context.Context, id string) (tools.Result, err
 }
 func (r *Runtime) runFlexibleWave(ctx context.Context, ids []string) (tools.Result, error) {
 	var output tools.Result
+	if len(ids) == 0 || len(ids) > 3 || r.workersUsed+len(ids) > 8 {
+		return output, fmt.Errorf("parallel wave exceeds budget")
+	}
+	seenIDs := map[string]bool{}
+	for _, id := range ids {
+		if seenIDs[id] {
+			return output, fmt.Errorf("duplicate task in parallel wave")
+		}
+		seenIDs[id] = true
+	}
+	for _, id := range ids {
+		if err := r.recoverBudgetTask(ctx, id); err != nil {
+			return output, err
+		}
+	}
 	err := r.Store.Locked(func(state *State) error {
 		status, err := r.Store.Status(state)
 		if err != nil {
@@ -216,7 +231,26 @@ func (r *Runtime) runFlexibleWave(ctx context.Context, ids []string) (tools.Resu
 			if previous != nil && previous.Status != "passed" && previous.Commit != "" {
 				base = previous.Commit
 			}
-			if _, err = gitCommand(ctx, integration, "worktree", "add", "-b", branch, root, base); err != nil {
+			resume := previous != nil && previous.StopReason == "step_limit" && previous.Recovery != nil && previous.Recovery.Plan.Action == "continue"
+			if resume {
+				run.RecoveryTrail = append(append([]*Recovery{}, previous.RecoveryTrail...), previous.Recovery)
+				relative = previous.Workspace
+				root, err = r.Store.Path(relative)
+				if err != nil {
+					return err
+				}
+				branch = previous.Branch
+				current, e := sourceHash(root)
+				if e != nil {
+					return e
+				}
+				if current != previous.Recovery.SourceHash {
+					return fmt.Errorf("worker changed after recovery review")
+				}
+				if _, err = checkpoint(ctx, root, &ExecutionWorkspace{}, "Preserve coordinator continuation "+id); err != nil {
+					return err
+				}
+			} else if _, err = gitCommand(ctx, integration, "worktree", "add", "-b", branch, root, base); err != nil {
 				return err
 			}
 			packet := map[string]any{"task": task, "briefs": briefs, "workspace": root, "branch": branch, "implementation_evidence": evidence}
@@ -226,7 +260,11 @@ func (r *Runtime) runFlexibleWave(ctx context.Context, ids []string) (tools.Resu
 					prior[key] = value
 				}
 				prior["summary"] = truncate(previous.Output, 1600)
+				prior["recent_actions"] = previous.RecentActions
 				packet["previous_attempt"] = prior
+				if resume {
+					packet["recovery_plan"] = previous.Recovery.Plan
+				}
 			}
 			if base != "HEAD" {
 				if _, err = gitCommand(ctx, root, "merge", "--no-edit", state.Execution.Commit); err != nil {
@@ -309,7 +347,7 @@ func (r *Runtime) runFlexibleWave(ctx context.Context, ids []string) (tools.Resu
 			if run.Status != "passed" {
 				failed = true
 			}
-			receipts = append(receipts, map[string]any{"id": done.job.id, "status": run.Status, "branch": run.Branch, "merged": run.Merged, "output": truncate(run.Output, 1600), "checks": run.Checks})
+			receipts = append(receipts, map[string]any{"id": done.job.id, "status": run.Status, "branch": run.Branch, "merged": run.Merged, "output": truncate(run.Output, 4000), "stop_reason": run.StopReason, "steps_used": run.StepsUsed, "checks": run.Checks})
 		}
 		output = jsonResult(map[string]any{"results": receipts, "workspace": integration, "branch": state.Execution.Branch})
 		output.IsError = failed
@@ -361,10 +399,7 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 	if r.WorkerModel != "" {
 		assembly.Model = r.WorkerModel
 	}
-	limit := r.MaxSteps
-	if limit <= 0 || limit > 40 {
-		limit = 40
-	}
+	limit := workerStepLimit(r.MaxSteps)
 	guard := &flexibleGuard{root: root, qa: qa, base: runtimeGuard{r}}
 	run.StepLimit = limit
 	workerLog := session.New(nil)
@@ -386,17 +421,10 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 		}
 	}
 	worker.SetUsageHook(usageHook)
-	recent := []string{}
 	worker.SetToolResultHook(func(call session.Block, value tools.Result) {
-		var args map[string]any
-		_ = json.Unmarshal(call.Arguments, &args)
-		target := text(args, "command")
-		if target == "" {
-			target = text(args, "path")
-		}
-		recent = append(recent, call.Name+" "+truncate(target, 160)+": "+truncate(resultText(value), 200))
-		if len(recent) > 4 {
-			recent = recent[len(recent)-4:]
+		run.RecentActions = append(run.RecentActions, captureWorkerAction(root, call, value))
+		if len(run.RecentActions) > 4 {
+			run.RecentActions = run.RecentActions[len(run.RecentActions)-4:]
 		}
 		if r.OnTool != nil {
 			r.progressMu.Lock()
@@ -427,7 +455,7 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 	after, scanErr := sourceFiles(root)
 	if errors.Is(runErr, agent.ErrStepLimit) {
 		run.StopReason = "step_limit"
-		run.Output = fmt.Sprintf("Worker reached its %d-step budget. Review and retry to continue from the preserved branch %s. Recent actions:\n%s", limit, job.branch, strings.Join(recent, "\n"))
+		run.Output = budgetHandoff(run)
 	} else if runErr != nil {
 		run.Output = runErr.Error()
 	} else if scanErr != nil {

@@ -12,14 +12,16 @@ import (
 var files embed.FS
 
 type Pack struct {
-	SchemaVersion int                 `json:"schema_version"`
-	Name          string              `json:"name"`
-	Label         string              `json:"label"`
-	Framework     string              `json:"framework"`
-	Kinds         map[string][]string `json:"kinds"`
-	FlexibleKinds map[string][]string `json:"flexible_kinds"`
-	CheckPrefixes []string            `json:"check_prefixes"`
-	Instructions  []string            `json:"instructions"`
+	WorkerStepLimit      int                 `json:"worker_step_limit"`
+	RecoveryInstructions string              `json:"recovery_instructions"`
+	SchemaVersion        int                 `json:"schema_version"`
+	Name                 string              `json:"name"`
+	Label                string              `json:"label"`
+	Framework            string              `json:"framework"`
+	Kinds                map[string][]string `json:"kinds"`
+	FlexibleKinds        map[string][]string `json:"flexible_kinds"`
+	CheckPrefixes        []string            `json:"check_prefixes"`
+	Instructions         []string            `json:"instructions"`
 }
 
 var Contract = loadPack()
@@ -33,3 +35,10 @@ func loadPack() Pack {
 	return p
 }
 func Instructions() string { return strings.Join(Contract.Instructions, "\n\n") }
+
+func workerStepLimit(configured int) int {
+	if configured <= 0 || configured > Contract.WorkerStepLimit {
+		return Contract.WorkerStepLimit
+	}
+	return configured
+}

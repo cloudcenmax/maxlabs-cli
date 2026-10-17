@@ -1,6 +1,8 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, readdir, lstat, realpath, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { recoverBudgetTask, recoveryChild } from "./team-recovery.ts";
+import type { Recovery, WorkerAction } from "./team-recovery.ts";
 import { flexibleChild, runFlexibleWave } from "./team-flexible.ts";
 import { applyExecution, type ExecutionWorkspace } from "./team-workspace.ts";
 import { inputFingerprint } from "./team-files.ts";
@@ -14,8 +16,9 @@ import type { GatewayTransport } from "./transport.ts";
 export const teamPack = JSON.parse(await readFile(new URL("../greenfield/pack.json", import.meta.url), "utf8"));
 export const environmentCommands = ["php --version", "composer --version", "node --version", "npm --version"];
 export const teamInstructions: string = teamPack.instructions.join("\n\n");
+export function teamWorkerStepLimit(configured: number): number { return configured > 0 ? Math.min(configured, teamPack.worker_step_limit) : teamPack.worker_step_limit; }
 export interface Artifact { kind: string; id: string; path: string; hash: string; summary: string; revision: number }
-export interface TaskRun { stop_reason?: string; steps_used?: number; step_limit?: number; usage?: { input_tokens: number; cached_input_tokens: number; output_tokens: number; reasoning_tokens: number; calls: number }; duration_ms?: number; branch?: string; workspace?: string; commit?: string; merged?: boolean; id?: string; archive?: string; status: string; attempts: number; output: string; bootstrap?: { command: string; passed: boolean; output: string; log?: string }; checks: Array<{ command: string; passed: boolean; output: string; log?: string }> }
+export interface TaskRun { recovery_trail?: Recovery[]; recovery?: Recovery; recent_actions?: WorkerAction[]; stop_reason?: string; steps_used?: number; step_limit?: number; usage?: { input_tokens: number; cached_input_tokens: number; output_tokens: number; reasoning_tokens: number; calls: number }; duration_ms?: number; branch?: string; workspace?: string; commit?: string; merged?: boolean; id?: string; archive?: string; status: string; attempts: number; output: string; bootstrap?: { command: string; passed: boolean; output: string; log?: string }; checks: Array<{ command: string; passed: boolean; output: string; log?: string }> }
 export interface TeamState {
   execution_mode: "flexible" | "scoped"; execution?: ExecutionWorkspace;
   schema_version: number; revision: number; artifacts: Artifact[];
@@ -289,7 +292,7 @@ export class TeamStore {
         s.files = {};
         if (s.execution_mode !== "flexible") for (const a of s.artifacts.filter(a => a.kind === "task")) { const task = await this.content(a); for (const path of [...task.read, ...task.write]) s.files[path] = await this.fileHash(path); }
         if (s.approvals.spec !== expected) s.runs = {};
-        else for (const run of Object.values(s.runs)) if (run.status !== "passed") run.attempts = 0;
+        else for (const run of Object.values(s.runs)) if (run.status !== "passed") { run.attempts = 0; delete run.recovery; }
       }
       if (gate === "release" && s.execution_mode === "flexible") await applyExecution(this, s);
       s.approvals[gate] = expected; s.revision++; await this.persist(s); return this.status(s);
@@ -321,14 +324,24 @@ export class TeamStore {
   }
 }
 
-export type TeamChild = (prompt: string, role: "research" | "worker", task: Record<string, any> | undefined, signal?: AbortSignal) => Promise<ToolResult>;
+export type TeamChild = (prompt: string, role: "research" | "worker" | "recovery", task: Record<string, any> | undefined, signal?: AbortSignal) => Promise<ToolResult>;
 export function teamTool(store: TeamStore, child: TeamChild, verify: (command: string, signal?: AbortSignal) => Promise<ToolResult>, authorizeReference: (path: string) => boolean = () => false) {
   let researchUsed = 0;
   let workersUsed = 0;
+  let recoveryUsed = 0;
   return {
-    resetBudget() { researchUsed = 0; workersUsed = 0; },
+    resetBudget() { researchUsed = 0; workersUsed = 0; recoveryUsed = 0; },
     async runBatch(ids: string[], signal?: AbortSignal): Promise<ToolResult> {
+      if (!ids.length || ids.length > 3 || new Set(ids).size !== ids.length) throw new Error("Invalid parallel wave");
       if (workersUsed + ids.length > 8) throw new Error("Worker batch budget reached (8 tasks)");
+      for (const id of ids) {
+        const run=(await store.load()).runs[id];
+        if(run?.status==='failed'&&run.stop_reason==='step_limit') {
+          if(!run.recovery&&recoveryUsed++>=3)throw new Error('Coordinator recovery budget reached (three diagnostic passes per batch)');
+          const recovery=await recoverBudgetTask(store,child,id,signal);
+          if(recovery.isError)throw new Error('Coordinator needs attention: '+recovery.text);
+        }
+      }
       workersUsed += ids.length;
       return runFlexibleWave(store, child, ids, signal);
     },
@@ -437,6 +450,7 @@ export function teamTool(store: TeamStore, child: TeamChild, verify: (command: s
 
 export function createTeamChild(store: TeamStore, transport: GatewayTransport, guard: PermissionGuard, settings: AgentSettings, workerModel: () => string = () => "", onTool?: AgentHooks["onTool"], onUsage?: AgentHooks["onUsage"]): TeamChild {
   return async (prompt, role, task, signal) => {
+    if(role==='recovery')return recoveryChild(store,transport,guard,settings,prompt,task!,teamPack.recovery_instructions,signal,onTool,onUsage);
     if (role === "worker" && task?._flexible) return flexibleChild(store, transport, guard, settings, workerModel(), prompt, task, signal, onTool, onUsage);
     let fetches = 0;
     const registry = createTools(store.workspace);
@@ -460,7 +474,7 @@ export function createTeamChild(store: TeamStore, transport: GatewayTransport, g
     }
     if (role === "research") scoped.register({ schema: { name: "team_reference", description: "Read an explicitly attached design reference directory or file.", parameters: { type: "object", properties: { id: { type: "string" }, path: { type: "string" } }, required: ["id"] } }, readOnly: true, async execute(args) { try { return { text: await store.reference(String(args.id), String(args.path || ".")) }; } catch (e) { return { text: String(e), isError: true }; } } });
     const childGuard = role === "worker" ? new PermissionGuard("auto", guard.prompt) : guard;
-    const child = new Agent(new SessionLog(), transport, scoped, childGuard, { ...settings, model: role === "worker" ? workerModel() || settings.model : settings.model, maxSteps: Math.min(settings.maxSteps, 40) }, { onTool, onUsage, toolResultLimit: () => 16_000 });
+    const child = new Agent(new SessionLog(), transport, scoped, childGuard, { ...settings, model: role === "worker" ? workerModel() || settings.model : settings.model, maxSteps: role === "worker" ? teamWorkerStepLimit(settings.maxSteps) : Math.min(settings.maxSteps, 40) }, { onTool, onUsage, toolResultLimit: () => 16_000 });
     try {
       let result = await child.run(`${role === "research" ? "Research only. Use official sources and cite exact URLs. Report unknowns and evidence; never implement." : 'Implement only the supplied task. Inspect existing code first. Follow approved contracts. No shell or delegation. The runner executes checks. Return ONLY a JSON object as your final answer, without prose or markdown: {"outcome":"completed" or "blocked","summary":"...","blockers":[]}. Report blocked if requirements cannot be met.'}\n\n${task?.role === "qa" ? "Independent QA: the runner has already executed the approved checks and supplied verification_evidence. Review that actual evidence and inspect source/design. Do not block merely because shell tools are unavailable; report genuine failures or gaps. You cannot edit files." : ""}\n\n${prompt}`, new SteeringQueue(), signal);
       if (role === "worker" && !reportOutcome(result.text)) {
@@ -496,7 +510,15 @@ export async function runApprovedTasks(store: TeamStore, tool: ReturnType<typeof
     const total = s.artifacts.filter(a => a.kind === "task").length, completed = Object.values(s.runs).filter(r => r.status === "passed").length;
     for (const id of wave) progress?.({ id, summary: s.artifacts.find(a => a.kind === "task" && a.id === id)!.summary, completed, total, status: "running" });
     const result = await tool.runBatch(wave, signal); i += wave.length;
-    if (result.isError) throw new Error("A worker or merge needs attention. Branches and check logs are preserved; dependent tasks were not run.");
+    if (result.isError) {
+      const current=await store.status();
+      const recoverable=i<8&&wave.every(id=>{const run=current.runs[id];return run?.status==='passed'||(run?.status==='failed'&&run.stop_reason==='step_limit'&&run.attempts<3);});
+      for(const id of wave)if(current.runs[id]?.status==='passed'){lines.push(`Verified and integrated ${id}.`);progress?.({id,summary:id,completed:Object.values(current.runs).filter(r=>r.status==='passed').length,total,status:'passed'});}
+      if(recoverable){lines.push('Coordinator is diagnosing the budget stop before continuing preserved work.');continue;}
+      const stops=wave.filter(id=>current.runs[id]?.stop_reason==='step_limit').map(id=>{const run=current.runs[id];return `${id} reached its ${run.step_limit}-call attempt limit after ${run.attempts} attempt(s). Preserved branch: ${run.branch}.`;});
+      if(stops.length)throw new Error('Automatic recovery stopped at its approved budget. '+stops.join(' ')+' Review saved worker reports and diagnoses before retrying; dependent tasks were not run.');
+      throw new Error("A worker or merge needs attention. Branches and check logs are preserved; dependent tasks were not run.");
+    }
     for (const id of wave) { progress?.({ id, summary: id, completed: completed+wave.length, total, status: "passed" }); lines.push(`Verified and integrated ${id}.`); }
     continue;
   }

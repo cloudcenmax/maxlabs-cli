@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// RunApproved dispatches the checked DAG without coordinator inference. It stops
-// at the first failure; retry/reapproval stays an explicit client operation.
+// RunApproved dispatches the checked DAG. Hard failures stop execution; budget
+// stops receive bounded coordinator diagnosis and continuation.
 func (r *Runtime) RunApproved(ctx context.Context) (string, int, error) {
 	lines := []string{}
 	count := 0
@@ -63,7 +63,35 @@ func (r *Runtime) RunApproved(ctx context.Context) (string, int, error) {
 				r.OnTool(session.ToolCall(fmt.Sprintf("dispatch-%d", count), "team", raw), result)
 			}
 			if result.IsError {
-				return "", count, fmt.Errorf("parallel wave needs attention; branches and evidence preserved. %s", resultText(result))
+				current, e := r.Store.Status(nil)
+				if e != nil {
+					return "", count, e
+				}
+				recoverable := count < 8
+				for _, id := range ids {
+					run := current.Runs[id]
+					if run != nil && run.Status == "passed" {
+						lines = append(lines, "Verified and integrated "+id+".")
+						continue
+					}
+					if run == nil || run.Status != "failed" || run.StopReason != "step_limit" || run.Attempts >= 3 {
+						recoverable = false
+					}
+				}
+				if recoverable {
+					lines = append(lines, "Coordinator is diagnosing the budget stop before continuing preserved work.")
+					continue
+				}
+				stops := []string{}
+				for _, id := range ids {
+					if run := current.Runs[id]; run != nil && run.StopReason == "step_limit" {
+						stops = append(stops, fmt.Sprintf("%s reached its %d-call attempt limit after %d attempt(s). Preserved branch: %s.", id, run.StepLimit, run.Attempts, run.Branch))
+					}
+				}
+				if len(stops) > 0 {
+					return strings.Join(lines, "\n"), count, fmt.Errorf("automatic recovery stopped at its approved budget. %s Review saved worker reports and diagnoses before retrying; dependent tasks were not run", strings.Join(stops, " "))
+				}
+				return strings.Join(lines, "\n"), count, fmt.Errorf("parallel wave needs attention; branches and evidence preserved. %s", resultText(result))
 			}
 			for _, id := range ids {
 				lines = append(lines, "Verified and integrated "+id+".")

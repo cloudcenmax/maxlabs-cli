@@ -21,6 +21,7 @@ type Runtime struct {
 	BeforeDispatch func() error
 	permissionMu   sync.Mutex
 	progressMu     sync.Mutex
+	recoveryUsed   int
 	researchUsed   int
 	workersUsed    int
 	OnTool         func(session.Block, tools.Result)
@@ -407,6 +408,9 @@ func (r *Runtime) child(ctx context.Context, role, prompt string, task map[strin
 	limit := r.MaxSteps
 	if limit <= 0 || limit > 40 {
 		limit = 40
+	}
+	if role == "worker" {
+		limit = workerStepLimit(r.MaxSteps)
 	}
 	child, e := agent.New(agent.Config{Assembly: assembly, Provider: r.Provider, Tools: r.Registry, Guard: guard, MaxSteps: limit, MaxRetries: 2, MaxToolResultBytes: 16000}, session.New(nil))
 	if e != nil {

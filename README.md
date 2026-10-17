@@ -447,7 +447,7 @@ release. Start with `maxlabs --team` or `/team` in an interactive session.
 /team reference ../admin     attach a read-only design reference
 /team approve design         accept the design and continue planning
 /team approve spec           approve outcomes and start the worker batch
-/team run                    continue approved tasks without coordinator inference
+/team run                    continue approved tasks with bounded recovery
 /team workspace              combined build folder and Git branch
 /team approve release        apply verified source after drift checks
 /team model ID               choose an enabled worker model
@@ -470,6 +470,15 @@ The dispatcher runs up to three independent tasks concurrently on their own Git
 branches/worktrees, merges passing branches serially into a combined build, and
 then runs independent QA against that result. Use `serial: true` for tasks that
 must run alone. Merge failures preserve branches and stop the next wave.
+
+Each Team worker attempt allows up to 100 model calls (or a smaller explicit
+`--max-steps` budget). At the limit, work is checkpointed and the coordinator
+inspects source and failure evidence before providing focused continuation steps.
+Continuation reuses the branch, working folder, and installed dependencies.
+Automatic recovery permits three attempts per task, three diagnostic passes per
+batch (four model calls each), and eight worker starts per batch. Unresolved work
+then stops with a reviewable handoff; it cannot retry indefinitely. Diagnoses and
+their token usage are saved separately from worker acceptance evidence.
 
 Source snapshots exclude local secrets and dependency trees. Workers record real
 verification through `verify`; a completion report alone cannot pass. QA runs its

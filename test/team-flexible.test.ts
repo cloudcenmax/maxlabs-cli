@@ -3,10 +3,13 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { TeamStore, teamTool, runApprovedTasks, type TeamChild } from '../src/greenfield.ts';
+import { TeamStore, teamTool, teamWorkerStepLimit, runApprovedTasks, type TeamChild } from '../src/greenfield.ts';
 import { Workspace, createTools } from '../src/tools.ts';
 import { workerEnvironment, sourceFiles, git } from '../src/team-workspace.ts';
 const report={text:'{"outcome":"completed","summary":"Outcomes verified","blockers":[]}'};
+test('Team worker attempts allow 100 model calls and respect explicit smaller budgets',()=>{
+ for(const [configured,expected] of [[0,100],[-1,100],[100,100],[101,100],[60,60],[2,2]])assert.equal(teamWorkerStepLimit(configured),expected);
+});
 async function seed(conflict=false) {
  const root=await mkdtemp(join(tmpdir(),'team-flexible-')),store=new TeamStore(await Workspace.open(root));
  await store.save('brief','product',{summary:'Personal task tools',scope:['Two simple operations'],open_questions:[]});
@@ -76,12 +79,42 @@ test('failing piped verification cannot merge a worker branch',async()=>{
  const child=createTeamChild(store,transport,new PermissionGuard('auto',async()=> 'deny'),{model:'worker',maxSteps:3,maxTokens:1024,thinking:'minimal',webSearch:'off',webSearchUses:0});
  const result=await teamTool(store,child,async()=>({text:'unused'})).runBatch(['alpha']);assert.equal(result.isError,true);const run=(await store.status()).runs.alpha;assert.equal(run.status,'failed');assert.equal(run.merged,undefined);assert.equal(run.checks[0].passed,false);
 });
-test('budget stop saves a useful handoff and retry resumes the preserved branch',async()=>{
- const {store}=await seed();const {createTeamChild}=await import('../src/greenfield.ts');const {PermissionGuard}=await import('../src/permission.ts');let calls=0,usageCalls=0,resume=false,sawHandoff=false;
+
+function recoveryTransport(keepCapping=false,mutate=false,blind=false){
+ let originalBranch='',recoveryCalls=0;
  const usage={uncachedInputTokens:10,cacheReadTokens:90,cacheWriteTokens:0,outputTokens:5,reasoningTokens:0,webSearches:0};
- const transport:any={async complete(request:any){calls++;if(resume&&JSON.stringify(request.messages).includes('step_limit'))sawHandoff=true;const content=resume?(calls===1?[{type:'tool_call',callId:'verify',name:'verify',arguments:JSON.stringify({command:'test -f partial.txt'})}]:[{type:'text',text:report.text}]):[{type:'tool_call',callId:'work-'+calls,name:calls===1?'write':'verify',arguments:JSON.stringify(calls===1?{path:'partial.txt',content:'preserved work'}:{command:"printf 'MaxLabs progress'"})}];return {message:{role:'assistant',content},usage};}};
- const settings:any={model:'worker',maxSteps:2,maxTokens:1024,thinking:'minimal',webSearch:'off',webSearchUses:0};const guard=new PermissionGuard('auto',async()=> 'deny');
- let child=createTeamChild(store,transport,guard,settings,()=>'',undefined,()=>{usageCalls++;});let result=await teamTool(store,child,async()=>({text:'unused'})).runBatch(['alpha']);assert.equal(result.isError,true);
- const paused=(await store.status()).runs.alpha;assert.equal(paused.stop_reason,'step_limit');assert.equal(paused.steps_used,2);assert.equal(paused.step_limit,2);assert.ok(paused.commit);assert.match(paused.output,/partial.txt/);assert.equal(usageCalls,2);
- resume=true;calls=0;child=createTeamChild(store,transport,guard,{...settings,maxSteps:3});result=await teamTool(store,child,async()=>({text:'unused'})).runBatch(['alpha']);assert.equal(result.isError,false,result.text);assert.equal(sawHandoff,true);assert.equal((await store.status()).runs.alpha.merged,true);
+ const transport:any={async complete(request:any){
+  let packet:any={};let recovery=false,hasResult=false;
+  for(const m of request.messages)for(const b of m.content){if(b.type==='tool_result')hasResult=true;if(b.text?.startsWith('You are the MaxLabs engineering coordinator'))recovery=true;const pos=b.text?.lastIndexOf('\n\n{')??-1;if(pos>=0)try{packet=JSON.parse(b.text.slice(pos+2));}catch{}}
+  const call=(name:string,args:any)=>({type:'tool_call',callId:name,name,arguments:JSON.stringify(args)}),answer=(content:any[])=>({message:{role:'assistant',content},usage});
+  if(recovery){recoveryCalls++;if(!hasResult&&!blind)return answer([mutate?call('verify',{command:'printf unexpected > partial.txt'}):call('read',{path:'partial.txt'})]);return answer([{type:'text',text:JSON.stringify({action:'continue',summary:'Observed fixture failure; finish using the preserved dependency setup.',next_steps:['Complete alpha.mjs and run targeted verification without discarding partial work or vendor.']})}]);}
+  const id=packet.task?.role==='qa'?'qa':packet.task?.summary?.split(' ').at(-1);
+  if(id==='alpha'&&(!packet.recovery_plan||keepCapping)){originalBranch ||= packet.branch;return answer(hasResult?[call('verify',{command:"printf 'Invalid signature fixture\\n' >&2; false"})]:[call('write',{path:'partial.txt',content:'preserved work'}),call('write',{path:'vendor/retained.txt',content:'installed dependency fixture'})]);}
+  if(hasResult)return answer([{type:'text',text:report.text}]);
+  if(id==='qa')return answer([call('verify',{command:'node --test acceptance.test.mjs'})]);
+  return answer([call('write',{path:id+'.mjs',content:`export const value='${id}';`}),call('verify',{command:(id==='alpha'?'test -f partial.txt && test -f vendor/retained.txt && ':'')+'node --check '+id+'.mjs'})]);
+ }};
+ return {transport,get originalBranch(){return originalBranch;},get recoveryCalls(){return recoveryCalls;}};
+}
+test('orchestrator diagnoses a budget stop and continues automatically with existing setup',async()=>{
+ const {store}=await seed();const {createTeamChild}=await import('../src/greenfield.ts');const {PermissionGuard}=await import('../src/permission.ts');const model=recoveryTransport();let usageCalls=0;
+ const child=createTeamChild(store,model.transport,new PermissionGuard('auto',async()=> 'deny'),{model:'worker',maxSteps:2,maxTokens:1024,thinking:'minimal',webSearch:'off',webSearchUses:0},()=>'',undefined,()=>usageCalls++);
+ await runApprovedTasks(store,teamTool(store,child,async()=>({text:'unused'})));
+ const s=await store.status(),run=s.runs.alpha;assert.equal(run.status,'passed');assert.equal(run.attempts,2);assert.equal(run.branch,model.originalBranch);assert.equal(model.recoveryCalls,2);assert.equal(s.runs.qa.status,'passed');assert.ok(usageCalls>=10);
+ assert.equal(run.recovery_trail?.length,1);assert.equal(run.recovery_trail![0].plan.action,'continue');assert.equal(run.recovery_trail![0].usage.calls,2);
+ assert.match(await readFile(join(await store.path(run.workspace!),'vendor/retained.txt'),'utf8'),/dependency/);
+});
+test('new user direction stops dispatch before automatic recovery',async()=>{
+ const {store}=await seed();const {createTeamChild}=await import('../src/greenfield.ts');const {PermissionGuard}=await import('../src/permission.ts');const model=recoveryTransport();let dispatches=0;
+ const child=createTeamChild(store,model.transport,new PermissionGuard('auto',async()=> 'deny'),{model:'worker',maxSteps:2,maxTokens:1024,thinking:'minimal',webSearch:'off',webSearchUses:0});
+ await assert.rejects(runApprovedTasks(store,teamTool(store,child,async()=>({text:'unused'})),undefined,()=>{if(++dispatches>1)throw new Error('new user direction');}),/new user direction/);
+ assert.equal(model.recoveryCalls,0);assert.equal((await store.status()).runs.alpha.attempts,1);
+});
+test('automatic recovery stops at three attempts and rejects source edits or blind retries',async()=>{
+ const {createTeamChild}=await import('../src/greenfield.ts');const {PermissionGuard}=await import('../src/permission.ts');
+ for(const mode of ['bounded','mutate','blind']){
+  const {store}=await seed(),model=recoveryTransport(mode==='bounded',mode==='mutate',mode==='blind');
+  const child=createTeamChild(store,model.transport,new PermissionGuard('auto',async()=> 'deny'),{model:'worker',maxSteps:2,maxTokens:1024,thinking:'minimal',webSearch:'off',webSearchUses:0});
+  await assert.rejects(runApprovedTasks(store,teamTool(store,child,async()=>({text:'unused'}))),mode==='bounded'?/Automatic recovery stopped at its approved budget.*Preserved branch:/:/Coordinator needs attention/);const s=await store.status();assert.equal(s.runs.alpha.attempts,mode==='bounded'?3:1);assert.equal(s.runs.qa,undefined);if(mode==='bounded')assert.equal(model.recoveryCalls,4);else assert.equal(s.runs.alpha.recovery?.plan.action,'blocked');
+ }
 });

@@ -3,6 +3,7 @@ package greenfield
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -309,51 +310,205 @@ func TestFailedPipelineCannotPassWorkerVerification(t *testing.T) {
 	}
 }
 
-func TestStepBudgetRetryPreservesWorkAndHandoff(t *testing.T) {
+type coordinatorRecoveryProvider struct {
+	fallback                   flexibleProvider
+	keepCapping, mutate, blind bool
+	mu                         sync.Mutex
+	originalBranch             string
+	recoveryCalls              int
+}
+
+func (p *coordinatorRecoveryProvider) Complete(ctx context.Context, req wire.Request) (llm.Response, error) {
+	packet := map[string]any{}
+	recovery, hasResult := false, false
+	for _, m := range req.Messages {
+		for _, b := range m.Content {
+			if b.Type == session.BlockToolResult {
+				hasResult = true
+			}
+			if strings.HasPrefix(b.Text, "You are the MaxLabs engineering coordinator") {
+				recovery = true
+			}
+			if pos := strings.LastIndex(b.Text, "\n\n{"); pos >= 0 {
+				_ = json.Unmarshal([]byte(b.Text[pos+2:]), &packet)
+			}
+		}
+	}
+	answer := func(text string) (llm.Response, error) {
+		return llm.Response{Message: session.Message{Role: session.RoleAssistant, Content: []session.Block{session.Text(text)}}, Usage: llm.Usage{UncachedInputTokens: 10, CacheReadTokens: 90, OutputTokens: 10}}, nil
+	}
+	call := func(name string, args string) (llm.Response, error) {
+		return llm.Response{Message: session.Message{Role: session.RoleAssistant, Content: []session.Block{session.ToolCall("fixture-"+name, name, json.RawMessage(args))}}, Usage: llm.Usage{UncachedInputTokens: 10, CacheReadTokens: 90, OutputTokens: 10}}, nil
+	}
+	if recovery {
+		p.mu.Lock()
+		p.recoveryCalls++
+		p.mu.Unlock()
+		if !hasResult && !p.blind {
+			if p.mutate {
+				return call("verify", `{"command":"printf unexpected > partial.txt"}`)
+			}
+			return call("read", `{"path":"partial.txt"}`)
+		}
+		return answer(`{"action":"continue","summary":"Observed fixture failure; preserve the installed dependency and complete the remaining implementation.","next_steps":["Complete alpha.mjs using the existing partial work, preserve vendor, and run targeted verification."]}`)
+	}
+	task, _ := packet["task"].(map[string]any)
+	if text(task, "summary") != "alpha" {
+		return p.fallback.Complete(ctx, req)
+	}
+	if packet["recovery_plan"] == nil || p.keepCapping {
+		p.mu.Lock()
+		if p.originalBranch == "" {
+			p.originalBranch = text(packet, "branch")
+		}
+		p.mu.Unlock()
+		if hasResult {
+			return call("verify", `{"command":"printf 'Invalid signature fixture\n' >&2; false"}`)
+		}
+		return llm.Response{Message: session.Message{Role: session.RoleAssistant, Content: []session.Block{session.ToolCall("partial", "write", json.RawMessage(`{"path":"partial.txt","content":"preserved work"}`)), session.ToolCall("dependency", "write", json.RawMessage(`{"path":"vendor/retained.txt","content":"installed dependency fixture"}`))}}}, nil
+	}
+	if hasResult {
+		return completedProvider{}.Complete(ctx, req)
+	}
+	return llm.Response{Message: session.Message{Role: session.RoleAssistant, Content: []session.Block{session.ToolCall("finish", "write", json.RawMessage(`{"path":"alpha.mjs","content":"export const value='alpha';"}`)), session.ToolCall("verify", "verify", json.RawMessage(`{"command":"test -f partial.txt && test -f vendor/retained.txt && node --check alpha.mjs"}`))}}}, nil
+}
+func TestOrchestratorDiagnosesBudgetStopAndContinuesAutomatically(t *testing.T) {
 	s := flexibleSeed(t)
 	r := runtime(t, s, false)
 	r.MaxSteps = 2
-	calls := 0
-	r.Provider = workerResponseFunc(func(req wire.Request) (llm.Response, error) {
-		calls++
-		call := session.ToolCall("write", "write", json.RawMessage(`{"path":"partial.txt","content":"preserved work"}`))
-		if calls > 1 {
-			call = session.ToolCall("verify", "verify", json.RawMessage(`{"command":"printf 'MaxLabs progress'"}`))
-		}
-		return llm.Response{Message: session.Message{Role: session.RoleAssistant, Content: []session.Block{call}}}, nil
-	})
-	result, err := r.runFlexible(context.Background(), "alpha")
-	if err != nil || !result.IsError {
-		t.Fatal(err, result)
+	p := &coordinatorRecoveryProvider{}
+	r.Provider = p
+	_, count, err := r.RunApproved(context.Background())
+	if err != nil {
+		t.Fatal(err)
 	}
 	status, _ := s.Status(nil)
-	paused := status.Runs["alpha"]
-	if paused.StopReason != "step_limit" || paused.StepsUsed != 2 || paused.StepLimit != 2 || paused.Commit == "" || !strings.Contains(paused.Output, "partial.txt") {
-		t.Fatalf("handoff missing: %+v", paused)
+	run := status.Runs["alpha"]
+	if count != 4 || run.Status != "passed" || run.Attempts != 2 || run.Branch != p.originalBranch || p.recoveryCalls != 2 || status.Runs["qa"].Status != "passed" {
+		t.Fatalf("automatic recovery failed: %d %+v recovery calls %d", count, run, p.recoveryCalls)
 	}
-	calls = 0
-	seenHandoff := false
-	r.MaxSteps = 3
-	r.Provider = workerResponseFunc(func(req wire.Request) (llm.Response, error) {
-		calls++
-		for _, m := range req.Messages {
-			for _, b := range m.Content {
-				if strings.Contains(b.Text, `"stop_reason":"step_limit"`) && strings.Contains(b.Text, "partial.txt") {
-					seenHandoff = true
-				}
+	root, _ := s.Path(run.Workspace)
+	raw, err := os.ReadFile(filepath.Join(root, "vendor/retained.txt"))
+	if err != nil || !strings.Contains(string(raw), "dependency") {
+		t.Fatal("dependency setup was discarded", err)
+	}
+	directory, _ := s.Path("recovery")
+	files, err := os.ReadDir(directory)
+	if err != nil || len(files) != 1 {
+		t.Fatal("recovery evidence missing", err, len(files))
+	}
+	record, _ := os.ReadFile(filepath.Join(directory, files[0].Name()))
+	var recovery Recovery
+	_ = json.Unmarshal(record, &recovery)
+	if recovery.Plan.Action != "continue" || recovery.Usage.Calls != 2 {
+		t.Fatal(recovery)
+	}
+	if len(run.RecoveryTrail) != 1 || run.RecoveryTrail[0].Archive != recovery.Archive {
+		t.Fatal("completed run lost coordinator evidence", run.RecoveryTrail)
+	}
+}
+func TestNewDirectionStopsBeforeAutomaticRecovery(t *testing.T) {
+	s := flexibleSeed(t)
+	r := runtime(t, s, false)
+	r.MaxSteps = 2
+	p := &coordinatorRecoveryProvider{}
+	r.Provider = p
+	dispatches := 0
+	r.BeforeDispatch = func() error {
+		dispatches++
+		if dispatches > 1 {
+			return fmt.Errorf("new user direction")
+		}
+		return nil
+	}
+	_, _, err := r.RunApproved(context.Background())
+	status, _ := s.Status(nil)
+	if err == nil || p.recoveryCalls != 0 || status.Runs["alpha"].Attempts != 1 {
+		t.Fatal("continued after user interruption", err, p.recoveryCalls)
+	}
+}
+func TestOrchestratorRecoveryIsBounded(t *testing.T) {
+	s := flexibleSeed(t)
+	r := runtime(t, s, false)
+	r.MaxSteps = 2
+	p := &coordinatorRecoveryProvider{keepCapping: true}
+	r.Provider = p
+	_, count, err := r.RunApproved(context.Background())
+	if err == nil {
+		t.Fatal("unbounded retry")
+	}
+	if !strings.Contains(err.Error(), "automatic recovery stopped at its approved budget") || !strings.Contains(err.Error(), "Preserved branch:") {
+		t.Fatal("missing actionable budget handoff", err)
+	}
+	status, _ := s.Status(nil)
+	if status.Runs["alpha"].Attempts != 3 || count != 4 || p.recoveryCalls != 4 || status.Runs["qa"] != nil {
+		t.Fatal(count, p.recoveryCalls, status.Runs)
+	}
+}
+func TestTeamWorkerAttemptLimitIs100(t *testing.T) {
+	if Contract.WorkerStepLimit != 100 {
+		t.Fatal(Contract.WorkerStepLimit)
+	}
+	for configured, expected := range map[int]int{0: 100, -1: 100, 100: 100, 101: 100, 60: 60, 2: 2} {
+		if actual := workerStepLimit(configured); actual != expected {
+			t.Fatalf("configured %d: got %d want %d", configured, actual, expected)
+		}
+	}
+}
+func TestCoordinatorCannotMutateSourceOrApproveBlindRetry(t *testing.T) {
+	for _, mode := range []string{"mutate", "blind"} {
+		t.Run(mode, func(t *testing.T) {
+			s := flexibleSeed(t)
+			r := runtime(t, s, false)
+			r.MaxSteps = 2
+			r.Provider = &coordinatorRecoveryProvider{mutate: mode == "mutate", blind: mode == "blind"}
+			_, _, err := r.RunApproved(context.Background())
+			if err == nil {
+				t.Fatal("invalid recovery allowed")
 			}
-		}
-		if calls > 1 {
-			return completedProvider{}.Complete(context.Background(), req)
-		}
-		return llm.Response{Message: session.Message{Role: session.RoleAssistant, Content: []session.Block{session.ToolCall("verify", "verify", json.RawMessage(`{"command":"test -f partial.txt"}`))}}}, nil
-	})
-	result, err = r.runFlexible(context.Background(), "alpha")
-	if err != nil || result.IsError || !seenHandoff {
-		t.Fatal(err, result, seenHandoff)
+			status, _ := s.Status(nil)
+			run := status.Runs["alpha"]
+			if run.Attempts != 1 || run.Merged || run.Recovery == nil || run.Recovery.Plan.Action != "blocked" || status.Runs["qa"] != nil {
+				t.Fatal(run)
+			}
+		})
 	}
-	status, _ = s.Status(nil)
-	if status.Runs["alpha"].Status != "passed" || !status.Runs["alpha"].Merged {
-		t.Fatal(status.Runs["alpha"])
+}
+
+func TestRecoveryFingerprintMatchesCLIAndIgnoresLaravelRuntimeData(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"artisan", "résumé&.txt", "\ue000.txt", "\U00010000.txt", "storage/framework/views/.gitignore"} {
+		path := filepath.Join(root, name)
+		_ = os.MkdirAll(filepath.Dir(path), 0755)
+		if err := os.WriteFile(path, []byte("MaxLabs fixture"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, err := sourceHash(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"storage/logs/laravel.log", "storage/framework/views/compiled.php", "bootstrap/cache/config.php", "database/database.sqlite"} {
+		path := filepath.Join(root, name)
+		_ = os.MkdirAll(filepath.Dir(path), 0755)
+		if err = os.WriteFile(path, []byte("runtime output"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	after, err := sourceHash(root)
+	if err != nil || before != after {
+		t.Fatal("runtime data changed source fingerprint", err)
+	}
+	cwd, _ := os.Getwd()
+	module := filepath.ToSlash(filepath.Join(cwd, "..", "src", "team-recovery.ts"))
+	script := `import {pathToFileURL} from 'node:url';const {sourceDigest}=await import(pathToFileURL(process.argv[1]).href);process.stdout.write(await sourceDigest(process.argv[2]));`
+	raw, err := exec.Command("node", "--input-type=module", "-e", script, module, root).CombinedOutput()
+	if err != nil || strings.TrimSpace(string(raw)) != after {
+		t.Fatal("CLI and Go fingerprints differ", err, string(raw), after)
+	}
+	_ = os.WriteFile(filepath.Join(root, "résumé&.txt"), []byte("changed source"), 0600)
+	changed, _ := sourceHash(root)
+	if changed == after {
+		t.Fatal("application source edits were ignored")
 	}
 }
