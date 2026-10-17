@@ -80,14 +80,14 @@ test('failing piped verification cannot merge a worker branch',async()=>{
  const result=await teamTool(store,child,async()=>({text:'unused'})).runBatch(['alpha']);assert.equal(result.isError,true);const run=(await store.status()).runs.alpha;assert.equal(run.status,'failed');assert.equal(run.merged,undefined);assert.equal(run.checks[0].passed,false);
 });
 
-function recoveryTransport(keepCapping=false,mutate=false,blind=false){
+function recoveryTransport(keepCapping=false,mutate=false,blind=false,cacheOutput=false){
  let originalBranch='',recoveryCalls=0;
  const usage={uncachedInputTokens:10,cacheReadTokens:90,cacheWriteTokens:0,outputTokens:5,reasoningTokens:0,webSearches:0};
  const transport:any={async complete(request:any){
   let packet:any={};let recovery=false,hasResult=false;
   for(const m of request.messages)for(const b of m.content){if(b.type==='tool_result')hasResult=true;if(b.text?.startsWith('You are the MaxLabs engineering coordinator'))recovery=true;const pos=b.text?.lastIndexOf('\n\n{')??-1;if(pos>=0)try{packet=JSON.parse(b.text.slice(pos+2));}catch{}}
   const call=(name:string,args:any)=>({type:'tool_call',callId:name,name,arguments:JSON.stringify(args)}),answer=(content:any[])=>({message:{role:'assistant',content},usage});
-  if(recovery){recoveryCalls++;if(!hasResult&&!blind)return answer([mutate?call('verify',{command:'printf unexpected > partial.txt'}):call('read',{path:'partial.txt'})]);return answer([{type:'text',text:JSON.stringify({action:'continue',summary:'Observed fixture failure; finish using the preserved dependency setup.',next_steps:['Complete alpha.mjs and run targeted verification without discarding partial work or vendor.']})}]);}
+  if(recovery){recoveryCalls++;if(!hasResult&&!blind){if(cacheOutput)await writeFile(join(packet.workspace,'.phpunit.result.cache'),'generated test timings');return answer([mutate?call('verify',{command:'printf unexpected > partial.txt'}):call('read',{path:'partial.txt'})]);}return answer([{type:'text',text:JSON.stringify({action:'continue',summary:'Observed fixture failure; finish using the preserved dependency setup.',next_steps:['Complete alpha.mjs and run targeted verification without discarding partial work or vendor.']})}]);}
   const id=packet.task?.role==='qa'?'qa':packet.task?.summary?.split(' ').at(-1);
   if(id==='alpha'&&(!packet.recovery_plan||keepCapping)){originalBranch ||= packet.branch;return answer(hasResult?[call('verify',{command:"printf 'Invalid signature fixture\\n' >&2; false"})]:[call('write',{path:'partial.txt',content:'preserved work'}),call('write',{path:'vendor/retained.txt',content:'installed dependency fixture'})]);}
   if(hasResult)return answer([{type:'text',text:report.text}]);
@@ -97,11 +97,12 @@ function recoveryTransport(keepCapping=false,mutate=false,blind=false){
  return {transport,get originalBranch(){return originalBranch;},get recoveryCalls(){return recoveryCalls;}};
 }
 test('orchestrator diagnoses a budget stop and continues automatically with existing setup',async()=>{
- const {store}=await seed();const {createTeamChild}=await import('../src/greenfield.ts');const {PermissionGuard}=await import('../src/permission.ts');const model=recoveryTransport();let usageCalls=0;
+ const {store}=await seed();const {createTeamChild}=await import('../src/greenfield.ts');const {PermissionGuard}=await import('../src/permission.ts');const model=recoveryTransport(false,false,false,true);let usageCalls=0;
  const child=createTeamChild(store,model.transport,new PermissionGuard('auto',async()=> 'deny'),{model:'worker',maxSteps:2,maxTokens:1024,thinking:'minimal',webSearch:'off',webSearchUses:0},()=>'',undefined,()=>usageCalls++);
  await runApprovedTasks(store,teamTool(store,child,async()=>({text:'unused'})));
  const s=await store.status(),run=s.runs.alpha;assert.equal(run.status,'passed');assert.equal(run.attempts,2);assert.equal(run.branch,model.originalBranch);assert.equal(model.recoveryCalls,2);assert.equal(s.runs.qa.status,'passed');assert.ok(usageCalls>=10);
  assert.equal(run.recovery_trail?.length,1);assert.equal(run.recovery_trail![0].plan.action,'continue');assert.equal(run.recovery_trail![0].usage.calls,2);
+ assert.deepEqual(run.recovery_trail![0].changed_files,[]);
  assert.match(await readFile(join(await store.path(run.workspace!),'vendor/retained.txt'),'utf8'),/dependency/);
 });
 test('new user direction stops dispatch before automatic recovery',async()=>{
@@ -115,6 +116,6 @@ test('automatic recovery stops at three attempts and rejects source edits or bli
  for(const mode of ['bounded','mutate','blind']){
   const {store}=await seed(),model=recoveryTransport(mode==='bounded',mode==='mutate',mode==='blind');
   const child=createTeamChild(store,model.transport,new PermissionGuard('auto',async()=> 'deny'),{model:'worker',maxSteps:2,maxTokens:1024,thinking:'minimal',webSearch:'off',webSearchUses:0});
-  await assert.rejects(runApprovedTasks(store,teamTool(store,child,async()=>({text:'unused'}))),mode==='bounded'?/Automatic recovery stopped at its approved budget.*Preserved branch:/:/Coordinator needs attention/);const s=await store.status();assert.equal(s.runs.alpha.attempts,mode==='bounded'?3:1);assert.equal(s.runs.qa,undefined);if(mode==='bounded')assert.equal(model.recoveryCalls,4);else assert.equal(s.runs.alpha.recovery?.plan.action,'blocked');
+  await assert.rejects(runApprovedTasks(store,teamTool(store,child,async()=>({text:'unused'}))),mode==='bounded'?/Automatic recovery stopped at its approved budget.*Preserved branch:/:/Coordinator needs attention/);const s=await store.status();assert.equal(s.runs.alpha.attempts,mode==='bounded'?3:1);assert.equal(s.runs.qa,undefined);if(mode==='bounded')assert.equal(model.recoveryCalls,4);else assert.equal(s.runs.alpha.recovery?.plan.action,'blocked');if(mode==='mutate'){assert.deepEqual(s.runs.alpha.recovery?.changed_files,['partial.txt']);assert.match(s.runs.alpha.recovery!.plan.summary,/partial.txt/);}
  }
 });

@@ -27,25 +27,35 @@ type RecoveryPlan struct {
 	NextSteps []string `json:"next_steps"`
 }
 type Recovery struct {
-	Plan       RecoveryPlan `json:"plan"`
-	SourceHash string       `json:"source_hash"`
-	Checks     []Check      `json:"checks"`
-	Usage      RunUsage     `json:"usage"`
-	Archive    string       `json:"archive"`
+	Plan         RecoveryPlan `json:"plan"`
+	SourceHash   string       `json:"source_hash"`
+	Checks       []Check      `json:"checks"`
+	Usage        RunUsage     `json:"usage"`
+	Archive      string       `json:"archive"`
+	ChangedFiles []string     `json:"changed_files,omitempty"`
 }
 
-func sourceHash(root string) (string, error) {
+func recoverySourceFiles(root string) (map[string]string, error) {
 	files, err := sourceFiles(root)
+	if err != nil {
+		return nil, err
+	}
+	_, laravel := files["artisan"]
+	for path := range files {
+		if path == ".phpunit.result.cache" || strings.HasPrefix(path, ".phpunit.cache/") || laravel && recoveryRuntimeFile(path) {
+			delete(files, path)
+		}
+	}
+	return files, nil
+}
+func sourceHash(root string) (string, error) {
+	files, err := recoverySourceFiles(root)
 	if err != nil {
 		return "", err
 	}
-	if _, laravel := files["artisan"]; laravel {
-		for path := range files {
-			if recoveryRuntimeFile(path) {
-				delete(files, path)
-			}
-		}
-	}
+	return recoveryFingerprint(files), nil
+}
+func recoveryFingerprint(files map[string]string) string {
 	keys := make([]string, 0, len(files))
 	for key := range files {
 		keys = append(keys, key)
@@ -58,7 +68,23 @@ func sourceHash(root string) (string, error) {
 		raw.WriteString(files[key])
 		raw.WriteByte('\n')
 	}
-	return hash([]byte(raw.String())), nil
+	return hash([]byte(raw.String()))
+}
+
+func changedRecoveryFiles(before, after map[string]string) []string {
+	changed := []string{}
+	for path, value := range before {
+		if after[path] != value {
+			changed = append(changed, path)
+		}
+	}
+	for path := range after {
+		if _, exists := before[path]; !exists {
+			changed = append(changed, path)
+		}
+	}
+	sort.Strings(changed)
+	return changed
 }
 
 func recoveryRuntimeFile(path string) bool {
@@ -117,10 +143,11 @@ func (r *Runtime) recoverBudgetTask(ctx context.Context, id string) error {
 		if state.Execution == nil {
 			return fmt.Errorf("execution workspace is unavailable")
 		}
-		before, err := sourceHash(root)
+		beforeFiles, err := recoverySourceFiles(root)
 		if err != nil {
 			return err
 		}
+		before := recoveryFingerprint(beforeFiles)
 		if run.Recovery != nil {
 			if run.Recovery.Plan.Action != "continue" {
 				return fmt.Errorf("coordinator needs attention for %s: %s", id, run.Recovery.Plan.Summary)
@@ -190,7 +217,12 @@ func (r *Runtime) recoverBudgetTask(ctx context.Context, id string) error {
 		}
 		assembly := r.Assembly
 		assembly.Tools = registry.Schemas()
-		coordinator, err := agent.New(agent.Config{Assembly: assembly, Provider: r.Provider, Tools: registry, Guard: &flexibleGuard{root: root, qa: true, base: runtimeGuard{r}}, MaxSteps: 4, MaxRetries: 1, MaxToolResultBytes: 6000}, session.New(nil))
+		diagnosticLog := session.New(nil)
+		coordinator, err := agent.New(agent.Config{Assembly: assembly, Provider: r.Provider, Tools: registry, Guard: &flexibleGuard{root: root, qa: true, base: runtimeGuard{r}}, MaxSteps: 4, MaxRetries: 1, MaxToolResultBytes: 6000, OnStep: func(step int) {
+			if step == 3 {
+				_, _ = diagnosticLog.Append(session.EventUserMessage, session.Message{Role: session.RoleUser, Source: "runner", Content: []session.Block{session.Text("Two diagnostic calls remain, including this call. Return the recovery JSON now if the evidence supports concrete worker next steps; leave further implementation debugging to the worker. Reserve the last call for the final diagnosis.")}}, session.AppendOp())
+			}
+		}}, diagnosticLog)
 		if err != nil {
 			return err
 		}
@@ -215,14 +247,16 @@ func (r *Runtime) recoverBudgetTask(ctx context.Context, id string) error {
 		})
 		turn, runErr := coordinator.Run(ctx, Contract.RecoveryInstructions+"\n\n"+string(raw))
 		plan, parseErr := parseRecovery(turn.Text)
-		after, scanErr := sourceHash(root)
+		afterFiles, scanErr := recoverySourceFiles(root)
+		after := recoveryFingerprint(afterFiles)
+		recovery.ChangedFiles = changedRecoveryFiles(beforeFiles, afterFiles)
 		switch {
 		case ctx.Err() != nil:
 			return ctx.Err()
 		case scanErr != nil:
 			return scanErr
 		case after != before:
-			plan = RecoveryPlan{Action: "blocked", Summary: "Diagnostic coordinator changed application source; review the preserved branch before continuing.", NextSteps: []string{}}
+			plan = RecoveryPlan{Action: "blocked", Summary: "Application source changed during diagnosis: " + truncate(strings.Join(recovery.ChangedFiles, ", "), 1600) + ". Review the preserved branch before continuing.", NextSteps: []string{}}
 		case runErr != nil:
 			plan = RecoveryPlan{Action: "blocked", Summary: "Coordinator diagnosis could not finish: " + runErr.Error(), NextSteps: []string{}}
 		case parseErr != nil:

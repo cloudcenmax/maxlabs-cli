@@ -313,6 +313,7 @@ func TestFailedPipelineCannotPassWorkerVerification(t *testing.T) {
 type coordinatorRecoveryProvider struct {
 	fallback                   flexibleProvider
 	keepCapping, mutate, blind bool
+	cacheOutput                bool
 	mu                         sync.Mutex
 	originalBranch             string
 	recoveryCalls              int
@@ -345,6 +346,9 @@ func (p *coordinatorRecoveryProvider) Complete(ctx context.Context, req wire.Req
 		p.recoveryCalls++
 		p.mu.Unlock()
 		if !hasResult && !p.blind {
+			if p.cacheOutput {
+				_ = os.WriteFile(filepath.Join(text(packet, "workspace"), ".phpunit.result.cache"), []byte("generated test timings"), 0600)
+			}
 			if p.mutate {
 				return call("verify", `{"command":"printf unexpected > partial.txt"}`)
 			}
@@ -376,7 +380,7 @@ func TestOrchestratorDiagnosesBudgetStopAndContinuesAutomatically(t *testing.T) 
 	s := flexibleSeed(t)
 	r := runtime(t, s, false)
 	r.MaxSteps = 2
-	p := &coordinatorRecoveryProvider{}
+	p := &coordinatorRecoveryProvider{cacheOutput: true}
 	r.Provider = p
 	_, count, err := r.RunApproved(context.Background())
 	if err != nil {
@@ -405,6 +409,9 @@ func TestOrchestratorDiagnosesBudgetStopAndContinuesAutomatically(t *testing.T) 
 	}
 	if len(run.RecoveryTrail) != 1 || run.RecoveryTrail[0].Archive != recovery.Archive {
 		t.Fatal("completed run lost coordinator evidence", run.RecoveryTrail)
+	}
+	if len(recovery.ChangedFiles) != 0 {
+		t.Fatal("test cache was reported as application source", recovery.ChangedFiles)
 	}
 }
 func TestNewDirectionStopsBeforeAutomaticRecovery(t *testing.T) {
@@ -488,7 +495,7 @@ func TestRecoveryFingerprintMatchesCLIAndIgnoresLaravelRuntimeData(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"storage/logs/laravel.log", "storage/framework/views/compiled.php", "bootstrap/cache/config.php", "database/database.sqlite"} {
+	for _, name := range []string{".phpunit.result.cache", ".phpunit.cache/test-results", "storage/logs/laravel.log", "storage/framework/views/compiled.php", "bootstrap/cache/config.php", "database/database.sqlite"} {
 		path := filepath.Join(root, name)
 		_ = os.MkdirAll(filepath.Dir(path), 0755)
 		if err = os.WriteFile(path, []byte("runtime output"), 0600); err != nil {
