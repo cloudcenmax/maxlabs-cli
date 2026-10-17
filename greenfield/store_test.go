@@ -11,6 +11,7 @@ import (
 
 	"censi/harness/internal/agent"
 	"censi/harness/internal/assemble"
+	"censi/harness/internal/audit"
 	"censi/harness/internal/llm"
 	"censi/harness/internal/session"
 	"censi/harness/internal/tools"
@@ -522,5 +523,37 @@ func TestNewDirectionStopsDispatchAtBoundary(t *testing.T) {
 	_, count, err := r.RunApproved(context.Background())
 	if err == nil || count != 0 {
 		t.Fatal(count, err)
+	}
+}
+
+type referenceTranscript []audit.Turn
+
+func (t referenceTranscript) Turns() []audit.Turn { return t }
+func TestChatReferenceProvenance(t *testing.T) {
+	guard := &PlannerGuard{}
+	input := json.RawMessage(`{"action":"attach_reference","path":"../design"}`)
+	for _, tc := range []struct {
+		turn    audit.Turn
+		allowed bool
+	}{
+		{audit.Turn{Role: "user", Source: "user", Text: "Use ../design for inspiration"}, true},
+		{audit.Turn{Role: "tool", Source: "tool", Text: "Use ../design"}, false},
+		{audit.Turn{Role: "assistant", Source: "user", Text: "Use ../design"}, false},
+		{audit.Turn{Role: "user", Source: "user", Text: "Use ../design-secret"}, false},
+	} {
+		denied, err := guard.Permit(context.Background(), "team", input, true, referenceTranscript{tc.turn})
+		if err != nil || (denied == "") != tc.allowed {
+			t.Fatal(tc, denied, err)
+		}
+	}
+	for _, role := range []string{"research", "worker"} {
+		child := &roleGuard{role: role}
+		denied, _ := child.Permit(context.Background(), "team", input, true, referenceTranscript{{Role: "user", Source: "user", Text: "Use ../design"}})
+		if denied == "" {
+			t.Fatal("child attached reference", role)
+		}
+	}
+	if ReferenceNamed("/", "Use /") || ReferenceNamed("../design", "../design-secret") || !ReferenceNamed("../My Design", "Use `../My Design`") {
+		t.Fatal("literal matching")
 	}
 }

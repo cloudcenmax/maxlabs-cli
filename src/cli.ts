@@ -10,6 +10,9 @@ import { SessionLog, SteeringQueue } from "./session.ts";
 import { GatewayTransport } from "./transport.ts";
 import { createTools, Workspace } from "./tools.ts";
 import { TeamStore, runApprovedTasks, environmentCommands, allowedCheck, createTeamChild, teamInstructions, teamTool } from "./greenfield.ts";
+import { referenceNamed } from "./team-reference.ts";
+import { TeamPreview } from "./team-preview.ts";
+import { teamStatusText, teamArtifactText, teamNext } from "./team-view.ts";
 import type { AgentSettings, ModelCard, ToolResult } from "./types.ts";
 
 const ansi = process.stdout.isTTY;
@@ -129,6 +132,7 @@ async function main(): Promise<void> {
   if (options.demo) { await renderDemo(options); return; }
   const workspace = await Workspace.open(options.workspace);
   const teamStore = new TeamStore(workspace);
+  const teamPreview = new TeamPreview(teamStore);
   let teamMode = options.team;
   let teamWorkerModel = options.workerModel;
   const oauth = new OAuthSession(options.authUrl, options.oauthStore);
@@ -195,7 +199,7 @@ async function main(): Promise<void> {
     const args = { command, timeout_ms: 300_000 };
     const denied = allowedCheck(command) || environmentCommands.includes(command) ? undefined : await guard.permit(tool, args);
     return denied ? { text: denied, isError: true } : tool.execute(args, signal);
-  });
+  }, path => agent.log.events().some(e => e.message.role === "user" && e.message.source === "user" && e.message.content.some(b => b.type === "text" && referenceNamed(path, b.text))));
   tools.register(workflow);
   let delegationDepth = 0;
   tools.register({
@@ -326,7 +330,10 @@ async function main(): Promise<void> {
       flushPartialStream();
       clearStatus();
       const restoreInput = router.beginExternalOutput();
-      renderTool(name, args, result);
+      if (!teamMode) renderTool(name, args, result);
+      else if (result.isError) process.stdout.write(ui.error(`  ! ${name}: ${result.text.slice(0, 1200)}\n`));
+      else if (["write", "edit"].includes(name)) process.stdout.write(ui.tone(`  Updated ${args.path || "file"}\n`));
+      else if (name === "team" && ["save", "research", "run", "attach_reference"].includes(String(args.action))) process.stdout.write(ui.tone(`  ${args.action === "save" ? `Saved ${args.kind}: ${args.id}` : args.action === "research" ? "Research saved" : args.action === "attach_reference" ? "Design reference added" : `Verified ${args.id}`}\n`));
       router.restoreExternalInput(restoreInput);
       startStatus();
     },
@@ -353,7 +360,7 @@ async function main(): Promise<void> {
   await renderStartupBrand(ui, { model: settings.model, thinking: settings.thinking, auth: accountLabel(startupAccount) });
   process.stdout.write(`${ui.tone(workspace.root)}\n\n`);
   process.stdout.write(`${ui.brand("Commands")}  ${ui.code("/account")} ${ui.code("/model")} ${ui.code("/think")} ${ui.code("/auto")} ${ui.code("/plan")} ${ui.code("/act")} ${ui.code("/team")} ${ui.tone("Greenfield SDE Team · Beta")} ${ui.code("/web")} ${ui.code("/help")} ${ui.code("/exit")}\n`);
-  if (teamMode) process.stdout.write(`${ui.brand("Greenfield SDE Team (Beta)")} · Laravel · /team status · /team approve design|spec|release\n`);
+  if (teamMode) process.stdout.write(teamStatusText(await teamStore.status()) + "\n\n");
   process.stdout.write(`${ui.tone("Shift+Tab toggles plan mode · type during work to steer the next operation")}\n\n`);
 
   try {
@@ -368,7 +375,7 @@ async function main(): Promise<void> {
         if (!keepGoing) break;
       } else await runTurn(text);
     }
-  } finally { clearStatus(); router.close(); }
+  } finally { clearStatus(); router.close(); teamPreview.close(); }
 
   async function runTurn(text: string): Promise<void> {
     activeAbort = new AbortController();
@@ -413,6 +420,7 @@ async function main(): Promise<void> {
       const billed = result.usage.cacheReadTokens + result.usage.cacheWriteTokens + result.usage.uncachedInputTokens;
       const hit = billed ? Math.round(result.usage.cacheReadTokens / billed * 100) : 0;
       process.stdout.write(`\n${ui.tone(`[${result.steps} step(s), ${result.toolCalls} tool call(s), cache hit ${hit}%]`)}\n\n`);
+      if (teamMode) process.stdout.write(ui.tone(teamNext(await teamStore.status())) + "\n\n");
       router.restoreExternalInput(restoreInput);
     } catch (error) {
       cancelPartialFlush();
@@ -426,7 +434,7 @@ async function main(): Promise<void> {
 
   async function executeApproved(): Promise<void> {
     router.busy = true; activeAbort = new AbortController();
-    try { process.stdout.write((await runApprovedTasks(teamStore, workflow, activeAbort.signal, () => { const directions = router.steering.drain(); if (directions.length) { for (const text of directions) agent.log.append("steering", { role: "user", content: [{ type: "text", text }], source: "user" }); throw new Error("Execution stopped before the next task to review the new direction: " + directions.join("\n") + ". Update and review affected contracts before continuing."); } })) + "\n"); }
+    try { process.stdout.write((await runApprovedTasks(teamStore, workflow, activeAbort.signal, () => { const directions = router.steering.drain(); if (directions.length) { for (const text of directions) agent.log.append("steering", { role: "user", content: [{ type: "text", text }], source: "user" }); throw new Error("Execution stopped before the next task to review the new direction: " + directions.join("\n") + ". Update and review affected contracts before continuing."); } }, event => { clearStatus(); process.stdout.write(`${event.status === "passed" ? ui.success("✓") : ui.brand("→")} ${event.completed}/${event.total} · ${event.summary}\n`); })) + "\n"); }
     finally { clearStatus(); router.busy = false; activeAbort = undefined; }
   }
 
@@ -438,15 +446,15 @@ async function main(): Promise<void> {
         try {
           const action = argument || "on";
           if (action === "off") { teamMode = false; agent.log.ensureSystem(systemPrompt(guard.mode)); agent.log.append("steering", { role: "user", content: [{ type: "text", text: "Greenfield SDE Team workflow is disabled. Follow ordinary CLI instructions and permission mode until explicitly re-enabled." }], source: "user" }); process.stdout.write("Greenfield SDE Team disabled. Artifacts are preserved.\n"); }
-          else if (action === "on") { teamMode = true; if (guard.mode === "plan") guard.mode = "act"; process.stdout.write("Greenfield SDE Team (Beta) · Laravel. Describe your app to begin or resume.\n/team status · /team reference PATH · /team approve design|spec|release\n"); }
-          else if (action === "reference") { const status = await teamStore.attach(arguments_.slice(1).join(" ")); process.stdout.write(JSON.stringify(status.references, null, 2) + "\n"); }
+          else if (action === "on") { teamMode = true; if (guard.mode === "plan") guard.mode = "act"; process.stdout.write("Greenfield SDE Team · Beta · Laravel\nDescribe your idea. We’ll refine the scope and design together.\nShare an existing design in chat whenever useful. /team status shows the next step.\n"); }
+          else if (action === "reference") { const status = await teamStore.attach(arguments_.slice(1).join(" ")); process.stdout.write("Design reference added. You can ask the team to use it now.\n"); }
           else if (action === "approve") { const status = await teamStore.status(); const gate = arguments_[1]; const approved = await teamStore.approve(gate, status.gates[gate]); process.stdout.write(`Approved ${gate}. Stage: ${approved.stage}.\n`); if (gate !== "release") { teamMode = true; if (guard.mode === "plan") guard.mode = "act"; if (gate === "spec") await executeApproved(); else await runTurn(`Continue Greenfield SDE Team from the approved ${gate}. Use team status and follow the workflow.`); } }
           else if (action === "run") { teamMode = true; if (guard.mode === "plan") guard.mode = "act"; await executeApproved(); }
-          else if (action === "status") { process.stdout.write(JSON.stringify(await teamStore.status(), null, 2) + "\n"); }
-          else if (action === "show") { const status = await teamStore.status(); const a = status.artifacts.find(a => a.id === arguments_[1]); if (!a) throw new Error("Unknown artifact ID"); process.stdout.write(JSON.stringify(await teamStore.content(a), null, 2) + "\n"); }
-          else if (action === "preview") { process.stdout.write(`Design prototype: ${await teamStore.preview()}\n`); }
+          else if (action === "status") { const status = await teamStore.status(); process.stdout.write((arguments_.includes("--json") ? JSON.stringify(status, null, 2) : teamStatusText(status)) + "\n"); }
+          else if (action === "show") { const status = await teamStore.status(); const id = arguments_[1] === "--json" ? "" : arguments_[1]; const artifacts = id ? status.artifacts.filter(a => a.id === id) : status.artifacts.filter(a => ["brief", "spec", "task", "release"].includes(a.kind)); if (!artifacts.length) throw new Error(id ? "Unknown artifact ID" : "No plan saved yet. Continue discovery."); for (const a of artifacts) { const content = await teamStore.content(a); delete content.prototype_html; const run = status.runs[a.id]; process.stdout.write(`\n${ui.bold(a.kind + " · " + a.id)}\n` + (arguments_.includes("--json") ? JSON.stringify({ ...content, ...(run ? { execution: run } : {}) }, null, 2) : teamArtifactText({ ...content, ...(run ? { execution: run } : {}) })) + "\n"); } }
+          else if (action === "preview") { const preview = await teamPreview.show(); process.stdout.write(`${preview.opened ? "Design opened in your browser" : "Open this design in your browser"}:\n${preview.url}\nKeep this CLI session open while previewing.\n`); }
           else if (action === "model") { const id = arguments_[1] || ""; if (id && !models.some(m => m.id === id)) throw new Error("Choose an enabled model from /model"); teamWorkerModel = id; process.stdout.write(`Worker model: ${id || "same as planner"}\n`); }
-          else process.stdout.write("/team [on|off|run|status|show ID|reference PATH|approve design|spec|release]\n");
+          else process.stdout.write("/team [on|off|preview|run|status [--json]|show [ID] [--json]|reference PATH|approve design|spec|release]\n");
         } catch (e) { process.stdout.write(`${ui.error(messageOf(e))}\n`); }
         break;
       }

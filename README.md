@@ -443,10 +443,12 @@ interactive session. Describe the app, answer the planner's questions, and revie
 its artifacts before approving implementation.
 
 ```text
-/team status                 show stage, readiness, task results and artifact IDs
+/team status                 show progress and the next action
+/team status --json          inspect full workflow state
 /team run                    resume a batch of approved tasks without planner calls
-/team show application       read a saved contract
-/team preview                export the interactive HTML design preview
+/team show                   review the brief, specification, task scopes and checks
+/team show application       read one contract (--json for machine-readable output)
+/team preview                open the interactive design in your system browser
 /team reference ../admin     attach a directory as a read-only design reference
 /team approve design         accept the current design and continue planning
 /team approve spec           authorize the listed changes/checks and start workers
@@ -454,6 +456,13 @@ its artifacts before approving implementation.
 /team model worker           select an enabled implementation model
 /team off                    leave the workflow without deleting its state
 ```
+
+Design inspiration is optional. Share a literal folder path in chat and the planner
+can attach it without a separate setup step; researchers cannot attach folders.
+`/team reference PATH` remains available as a manual shortcut. The CLI preview
+uses an isolated loopback server for this session, serves only the saved design,
+and blocks network/file access with a sandbox policy. If the OS cannot open a
+browser, the CLI prints the working URL. Keep the CLI session open while viewing it.
 
 The normal `/model` selects the planner. `--worker-model ID` or `/team model ID`
 selects workers independently; researchers use the planner model. An omitted

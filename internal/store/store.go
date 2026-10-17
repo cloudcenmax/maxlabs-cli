@@ -369,7 +369,13 @@ func summarise(file *os.File) (string, int) {
 func firstText(message session.Message) string {
 	for _, block := range message.Content {
 		if block.Type == session.BlockText && block.Text != "" {
-			text := strings.Join(strings.Fields(block.Text), " ")
+			text := block.Text
+			if strings.HasPrefix(text, "[Greenfield SDE Team (Beta):") {
+				if end := strings.Index(text, "]\n\n"); end >= 0 {
+					text = text[end+3:]
+				}
+			}
+			text = strings.Join(strings.Fields(text), " ")
 
 			const limit = 120
 			if runes := []rune(text); len(runes) > limit {

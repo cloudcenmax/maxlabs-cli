@@ -442,3 +442,25 @@ func TestProjectsListingFindsHistory(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkflowMetadataDoesNotReplaceChatPreview(t *testing.T) {
+	s, _ := newStore(t)
+	project, err := s.Project(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := session.New(nil)
+	if _, err := log.Append(session.EventUserMessage, session.Message{Role: session.RoleUser, Content: []session.Block{session.Text("[Greenfield SDE Team (Beta): stage=discovery, revision=0. Use team status.]\n\nBuild a personal task manager")}}, session.AppendOp()); err != nil {
+		t.Fatal(err)
+	}
+	if err := project.Append("team-chat", log.Events()...); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := project.Sessions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessions[0].Preview != "Build a personal task manager" {
+		t.Fatal(sessions[0].Preview)
+	}
+}

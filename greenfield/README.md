@@ -54,7 +54,10 @@ prompts and artifact persistence.
 
 ## Reference and integration research
 
-Reference roots can only be attached through the CLI or desktop control. Reads
+Reference roots can be attached through client controls or the planner’s
+`attach_reference` action when the exact literal path occurs in a human-authored
+chat turn. The planner guard rejects paths sourced only from assistant/tool text;
+researchers and workers cannot attach folders. Design inspiration is optional. Reads
 resolve canonical paths, reject traversal and symlink escapes, omit dependency
 folders from directory listings, and refuse environment/Git metadata. References
 are read-only and are not executable instructions. The approved design captures

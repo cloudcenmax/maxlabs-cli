@@ -33,7 +33,7 @@ type Runtime struct {
 }
 
 func (r *Runtime) Definition() tools.Definition {
-	return tools.Definition{Name: "team", Description: "Greenfield SDE Team (Beta). Persist contracts, inspect readiness, read attached references, research in up to three agents, or run one approved task. Human approvals are only available through client controls.", ReadOnly: true, Parameters: json.RawMessage(`{"type":"object","properties":{"action":{"type":"string","enum":["status","environment","artifact","save","reference","research","run"]},"kind":{"type":"string"},"id":{"type":"string"},"path":{"type":"string"},"content":{"type":"object"},"jobs":{"type":"array","maxItems":3,"items":{"type":"string"}}},"required":["action"],"additionalProperties":false}`)}
+	return tools.Definition{Name: "team", Description: "Greenfield SDE Team (Beta). Persist contracts, inspect readiness, attach a folder explicitly supplied in chat, read attached references, research in up to three agents, or run one approved task. Human approvals are only available through client controls.", ReadOnly: true, Parameters: json.RawMessage(`{"type":"object","properties":{"action":{"type":"string","enum":["status","environment","artifact","save","reference","attach_reference","research","run"]},"kind":{"type":"string"},"id":{"type":"string"},"path":{"type":"string"},"content":{"type":"object"},"jobs":{"type":"array","maxItems":3,"items":{"type":"string"}}},"required":["action"],"additionalProperties":false}`)}
 }
 func jsonResult(v any) tools.Result {
 	raw, e := json.Marshal(v)
@@ -125,6 +125,12 @@ func (r *Runtime) Execute(ctx context.Context, raw json.RawMessage) (tools.Resul
 			}
 		}
 		return jsonResult(map[string]any{"artifact_root": ".maxlabs/team", "artifact": artifact, "stage": s.Stage, "revision": s.Revision, "errors": s.Errors, "ready": s.Ready}), nil
+	case "attach_reference":
+		s, e := r.Store.Attach(args.Path)
+		if e != nil {
+			return fail(e)
+		}
+		return jsonResult(map[string]any{"references": s.References}), nil
 	case "reference":
 		s, e := r.Store.Reference(args.ID, args.Path)
 		if e != nil {
@@ -478,6 +484,25 @@ type PlannerGuard struct {
 }
 
 func (g *PlannerGuard) Permit(ctx context.Context, name string, args json.RawMessage, readOnly bool, t audit.Transcript) (string, error) {
+	if name == "team" {
+		var input struct {
+			Action string `json:"action"`
+			Path   string `json:"path"`
+		}
+		if json.Unmarshal(args, &input) != nil {
+			return "invalid tool arguments", nil
+		}
+		if input.Action == "attach_reference" {
+			if t != nil {
+				for _, turn := range t.Turns() {
+					if turn.Role == "user" && turn.Source == "user" && ReferenceNamed(input.Path, turn.Text) {
+						return "", nil
+					}
+				}
+			}
+			return "Use only an exact folder path supplied by the user in chat. Ask which design to use if no path was provided", nil
+		}
+	}
 	if name == "webfetch" {
 		g.Fetches++
 		if g.Fetches > 6 {

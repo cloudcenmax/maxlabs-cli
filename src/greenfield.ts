@@ -268,12 +268,12 @@ export class TeamStore {
 }
 
 export type TeamChild = (prompt: string, role: "research" | "worker", task: Record<string, any> | undefined, signal?: AbortSignal) => Promise<ToolResult>;
-export function teamTool(store: TeamStore, child: TeamChild, verify: (command: string, signal?: AbortSignal) => Promise<ToolResult>) {
+export function teamTool(store: TeamStore, child: TeamChild, verify: (command: string, signal?: AbortSignal) => Promise<ToolResult>, authorizeReference: (path: string) => boolean = () => false) {
   let researchUsed = 0;
   let workersUsed = 0;
   return {
     resetBudget() { researchUsed = 0; workersUsed = 0; },
-    schema: { name: "team", description: "Greenfield SDE Team (Beta). Persist contracts, inspect status, read attached references, delegate up to three research jobs, or execute one approved task. Human approvals are only available in client controls.", parameters: { type: "object", properties: { action: { type: "string", enum: ["status", "environment", "artifact", "save", "reference", "research", "run"] }, kind: { type: "string" }, id: { type: "string" }, content: { type: "object" }, path: { type: "string" }, jobs: { type: "array", maxItems: 3, items: { type: "string" } } }, required: ["action"], additionalProperties: false } },
+    schema: { name: "team", description: "Greenfield SDE Team (Beta). Persist contracts, inspect status, attach a folder explicitly supplied in chat, read attached references, delegate up to three research jobs, or execute one approved task. Human approvals are only available in client controls.", parameters: { type: "object", properties: { action: { type: "string", enum: ["status", "environment", "artifact", "save", "reference", "attach_reference", "research", "run"] }, kind: { type: "string" }, id: { type: "string" }, content: { type: "object" }, path: { type: "string" }, jobs: { type: "array", maxItems: 3, items: { type: "string" } } }, required: ["action"], additionalProperties: false } },
     readOnly: true,
     async execute(args: Record<string, any>, signal?: AbortSignal): Promise<ToolResult> {
       try {
@@ -297,6 +297,10 @@ export function teamTool(store: TeamStore, child: TeamChild, verify: (command: s
           if (args.kind === "evidence") throw new Error("Evidence is recorded only by successful research fetches");
           const status = await store.save(args.kind, args.id, args.content);
           return { text: JSON.stringify({ artifact_root: ".maxlabs/team", artifact: status.artifacts.find(a => a.kind === args.kind && a.id === args.id), stage: status.stage, revision: status.revision, errors: status.errors, ready: status.ready }) };
+        }
+        if (args.action === "attach_reference") {
+          if (typeof args.path !== "string" || !authorizeReference(args.path)) throw new Error("Use only an exact folder path supplied by the user in chat. Ask which design to use if no path was provided.");
+          const status = await store.attach(args.path); return { text: JSON.stringify({ references: status.references, note: "Reference attached; use team reference to inspect it." }) };
         }
         if (args.action === "reference") return { text: await store.reference(args.id, args.path) };
         if (args.action === "research") {
@@ -411,14 +415,15 @@ function reportOutcome(raw: string): string {
   catch { return ""; }
 }
 
-export async function runApprovedTasks(store: TeamStore, tool: ReturnType<typeof teamTool>, signal?: AbortSignal, beforeDispatch?: () => void): Promise<string> {
+export async function runApprovedTasks(store: TeamStore, tool: ReturnType<typeof teamTool>, signal?: AbortSignal, beforeDispatch?: () => void, progress?: (event: { id: string; summary: string; completed: number; total: number; status: "running" | "passed" }) => void): Promise<string> {
  tool.resetBudget(); const lines: string[] = [];
  for (let i = 0; i < 8; i++) {
   signal?.throwIfAborted(); beforeDispatch?.(); const s = await store.status();
   if (s.errors.length) throw new Error("Resolve readiness errors: " + s.errors.join("; "));
   if (!s.ready.length) break;
-  const id = s.ready[0]; const result = await tool.execute({ action: "run", id }, signal);
-  if (result.isError) throw new Error(`Task ${id} failed; dependent tasks were not run.\n${result.text}`);
+  const id = s.ready[0]; const task = s.artifacts.find(a => a.kind === "task" && a.id === id)!; const total = s.artifacts.filter(a => a.kind === "task").length; const completed = Object.values(s.runs).filter(r => r.status === "passed").length; progress?.({ id, summary: task.summary, completed, total, status: "running" }); const result = await tool.execute({ action: "run", id }, signal);
+  if (result.isError) throw new Error(`Task ${id} needs attention; dependent tasks were not run. Review /team show ${id} for the worker report and check logs.`);
+  progress?.({ id, summary: task.summary, completed: completed + 1, total, status: "passed" });
   lines.push(`Verified ${id} with all approved checks.`);
  }
  const s = await store.status(); const tasks = s.artifacts.filter(a => a.kind === "task");
