@@ -124,7 +124,7 @@ func (p *HTTPProvider) Stream(ctx context.Context, req wire.Request, onDelta Del
 		}
 		excerpt := make([]byte, limit)
 		n, _ := resp.Body.Read(excerpt)
-		return Response{}, fmt.Errorf("llm: upstream returned %d: %s",
+		return Response{}, fmt.Errorf("llm: MaxLabs returned %d: %s",
 			resp.StatusCode, strings.TrimSpace(string(excerpt[:n])))
 	}
 
