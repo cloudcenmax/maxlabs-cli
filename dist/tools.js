@@ -245,8 +245,8 @@ function failure(prefix        , error         )             {
 }
 
 async function runShell(command        , cwd        , timeout        , signal              , environment                    )                      {
-  const shell = process.platform === "win32" ? process.env.ComSpec || "cmd.exe" : "/bin/sh";
-  const args = process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-c", command];
+  const shell = process.platform === "win32" ? process.env.ComSpec || "cmd.exe" : "/bin/bash";
+  const args = process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-o", "pipefail", "-c", command];
   return new Promise((resolvePromise) => {
     const child = spawn(shell, args, { cwd, env: environment || process.env, signal });
     const chunks           = [];

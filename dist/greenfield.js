@@ -435,9 +435,9 @@ export function teamTool(store           , child           , verify             
   };
 }
 
-export function createTeamChild(store           , transport                  , guard                 , settings               , workerModel               = () => "", onTool                       )            {
+export function createTeamChild(store           , transport                  , guard                 , settings               , workerModel               = () => "", onTool                       , onUsage                        )            {
   return async (prompt, role, task, signal) => {
-    if (role === "worker" && task?._flexible) return flexibleChild(store, transport, guard, settings, workerModel(), prompt, task, signal, onTool);
+    if (role === "worker" && task?._flexible) return flexibleChild(store, transport, guard, settings, workerModel(), prompt, task, signal, onTool, onUsage);
     let fetches = 0;
     const registry = createTools(store.workspace);
     const scoped = new ToolRegistry();
@@ -460,7 +460,7 @@ export function createTeamChild(store           , transport                  , g
     }
     if (role === "research") scoped.register({ schema: { name: "team_reference", description: "Read an explicitly attached design reference directory or file.", parameters: { type: "object", properties: { id: { type: "string" }, path: { type: "string" } }, required: ["id"] } }, readOnly: true, async execute(args) { try { return { text: await store.reference(String(args.id), String(args.path || ".")) }; } catch (e) { return { text: String(e), isError: true }; } } });
     const childGuard = role === "worker" ? new PermissionGuard("auto", guard.prompt) : guard;
-    const child = new Agent(new SessionLog(), transport, scoped, childGuard, { ...settings, model: role === "worker" ? workerModel() || settings.model : settings.model, maxSteps: Math.min(settings.maxSteps, 40) }, { onTool, toolResultLimit: () => 16_000 });
+    const child = new Agent(new SessionLog(), transport, scoped, childGuard, { ...settings, model: role === "worker" ? workerModel() || settings.model : settings.model, maxSteps: Math.min(settings.maxSteps, 40) }, { onTool, onUsage, toolResultLimit: () => 16_000 });
     try {
       let result = await child.run(`${role === "research" ? "Research only. Use official sources and cite exact URLs. Report unknowns and evidence; never implement." : 'Implement only the supplied task. Inspect existing code first. Follow approved contracts. No shell or delegation. The runner executes checks. Return ONLY a JSON object as your final answer, without prose or markdown: {"outcome":"completed" or "blocked","summary":"...","blockers":[]}. Report blocked if requirements cannot be met.'}\n\n${task?.role === "qa" ? "Independent QA: the runner has already executed the approved checks and supplied verification_evidence. Review that actual evidence and inspect source/design. Do not block merely because shell tools are unavailable; report genuine failures or gaps. You cannot edit files." : ""}\n\n${prompt}`, new SteeringQueue(), signal);
       if (role === "worker" && !reportOutcome(result.text)) {

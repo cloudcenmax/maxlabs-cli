@@ -30,6 +30,9 @@ type Check struct {
 	Output  string `json:"output"`
 }
 type Run struct {
+	StopReason string    `json:"stop_reason,omitempty"`
+	StepsUsed  int       `json:"steps_used,omitempty"`
+	StepLimit  int       `json:"step_limit,omitempty"`
 	Usage      *RunUsage `json:"usage,omitempty"`
 	DurationMS int64     `json:"duration_ms,omitempty"`
 	Branch     string    `json:"branch,omitempty"`

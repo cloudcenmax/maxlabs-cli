@@ -280,3 +280,80 @@ func TestRetryRecoversInterruptedUncommittedWork(t *testing.T) {
 		t.Fatal("interrupted work lost", e)
 	}
 }
+
+type workerResponseFunc func(wire.Request) (llm.Response, error)
+
+func (f workerResponseFunc) Complete(_ context.Context, request wire.Request) (llm.Response, error) {
+	return f(request)
+}
+
+func TestFailedPipelineCannotPassWorkerVerification(t *testing.T) {
+	s := flexibleSeed(t)
+	r := runtime(t, s, false)
+	calls := 0
+	r.Provider = workerResponseFunc(func(req wire.Request) (llm.Response, error) {
+		calls++
+		if calls > 1 {
+			return completedProvider{}.Complete(context.Background(), req)
+		}
+		return llm.Response{Message: session.Message{Role: session.RoleAssistant, Content: []session.Block{session.ToolCall("verify", "verify", json.RawMessage(`{"command":"false 2>&1 | tail -20"}`))}}}, nil
+	})
+	result, err := r.runFlexible(context.Background(), "alpha")
+	if err != nil || !result.IsError {
+		t.Fatal(err, result)
+	}
+	status, _ := s.Status(nil)
+	run := status.Runs["alpha"]
+	if run.Status != "failed" || run.Merged || len(run.Checks) != 1 || run.Checks[0].Passed {
+		t.Fatalf("masked failure passed: %+v", run)
+	}
+}
+
+func TestStepBudgetRetryPreservesWorkAndHandoff(t *testing.T) {
+	s := flexibleSeed(t)
+	r := runtime(t, s, false)
+	r.MaxSteps = 2
+	calls := 0
+	r.Provider = workerResponseFunc(func(req wire.Request) (llm.Response, error) {
+		calls++
+		call := session.ToolCall("write", "write", json.RawMessage(`{"path":"partial.txt","content":"preserved work"}`))
+		if calls > 1 {
+			call = session.ToolCall("verify", "verify", json.RawMessage(`{"command":"printf 'MaxLabs progress'"}`))
+		}
+		return llm.Response{Message: session.Message{Role: session.RoleAssistant, Content: []session.Block{call}}}, nil
+	})
+	result, err := r.runFlexible(context.Background(), "alpha")
+	if err != nil || !result.IsError {
+		t.Fatal(err, result)
+	}
+	status, _ := s.Status(nil)
+	paused := status.Runs["alpha"]
+	if paused.StopReason != "step_limit" || paused.StepsUsed != 2 || paused.StepLimit != 2 || paused.Commit == "" || !strings.Contains(paused.Output, "partial.txt") {
+		t.Fatalf("handoff missing: %+v", paused)
+	}
+	calls = 0
+	seenHandoff := false
+	r.MaxSteps = 3
+	r.Provider = workerResponseFunc(func(req wire.Request) (llm.Response, error) {
+		calls++
+		for _, m := range req.Messages {
+			for _, b := range m.Content {
+				if strings.Contains(b.Text, `"stop_reason":"step_limit"`) && strings.Contains(b.Text, "partial.txt") {
+					seenHandoff = true
+				}
+			}
+		}
+		if calls > 1 {
+			return completedProvider{}.Complete(context.Background(), req)
+		}
+		return llm.Response{Message: session.Message{Role: session.RoleAssistant, Content: []session.Block{session.ToolCall("verify", "verify", json.RawMessage(`{"command":"test -f partial.txt"}`))}}}, nil
+	})
+	result, err = r.runFlexible(context.Background(), "alpha")
+	if err != nil || result.IsError || !seenHandoff {
+		t.Fatal(err, result, seenHandoff)
+	}
+	status, _ = s.Status(nil)
+	if status.Runs["alpha"].Status != "passed" || !status.Runs["alpha"].Merged {
+		t.Fatal(status.Runs["alpha"])
+	}
+}

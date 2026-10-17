@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -286,5 +287,24 @@ func TestBashBoundsLargeOutput(t *testing.T) {
 	}
 	if !strings.Contains(text(result), "omitted") {
 		t.Fatal("the result must say that it was truncated")
+	}
+}
+
+func TestBashPipelinesPreserveProducerFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Bash pipeline semantics")
+	}
+	ws, _ := workspace(t)
+	tool := tools.NewBashTool(ws)
+	for _, command := range []string{"false 2>&1 | tail -20", "false 2>&1 | head -40", "printf 'ok\\n' | tail -1 | false"} {
+		args, _ := json.Marshal(map[string]string{"command": command})
+		result, err := tool.Execute(context.Background(), args)
+		if err != nil || !result.IsError || strings.Contains(text(result), "Command exited 0.") {
+			t.Fatalf("%s: %v %s", command, err, text(result))
+		}
+	}
+	result := run(t, tool, `{"command":"printf 'MaxLabs passed\\n' | tail -1"}`)
+	if result.IsError {
+		t.Fatal(text(result))
 	}
 }

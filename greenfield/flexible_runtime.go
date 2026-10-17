@@ -3,9 +3,11 @@ package greenfield
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -87,7 +89,13 @@ func (t verificationTool) Definition() tools.Definition {
 func (t verificationTool) Execute(ctx context.Context, args json.RawMessage) (tools.Result, error) {
 	var input map[string]any
 	_ = json.Unmarshal(args, &input)
-	result, err := t.shell.Execute(ctx, args)
+	var result tools.Result
+	var err error
+	if goruntime.GOOS == "windows" && strings.Contains(text(input, "command"), "|") {
+		result = tools.Error("MaxLabs verification requires an unpiped command on Windows so a failed test cannot be hidden by an output filter.")
+	} else {
+		result, err = t.shell.Execute(ctx, args)
+	}
 	if err != nil {
 		return result, err
 	}
@@ -173,7 +181,7 @@ func (r *Runtime) runFlexibleWave(ctx context.Context, ids []string) (tools.Resu
 				check.Output = truncate(check.Output, 1600)
 				checks = append(checks, check)
 			}
-			evidence[id] = map[string]any{"status": previous.Status, "summary": truncate(previous.Output, 1000), "checks": checks, "branch": previous.Branch}
+			evidence[id] = map[string]any{"status": previous.Status, "summary": truncate(previous.Output, 1000), "checks": checks, "branch": previous.Branch, "stop_reason": previous.StopReason, "steps_used": previous.StepsUsed}
 		}
 		for _, id := range ids {
 			task := tasks[id]
@@ -213,7 +221,12 @@ func (r *Runtime) runFlexibleWave(ctx context.Context, ids []string) (tools.Resu
 			}
 			packet := map[string]any{"task": task, "briefs": briefs, "workspace": root, "branch": branch, "implementation_evidence": evidence}
 			if previous != nil {
-				packet["previous_attempt"] = map[string]any{"status": previous.Status, "summary": truncate(previous.Output, 1600), "branch": previous.Branch}
+				prior := map[string]any{}
+				for key, value := range evidence[id].(map[string]any) {
+					prior[key] = value
+				}
+				prior["summary"] = truncate(previous.Output, 1600)
+				packet["previous_attempt"] = prior
 			}
 			if base != "HEAD" {
 				if _, err = gitCommand(ctx, root, "merge", "--no-edit", state.Execution.Commit); err != nil {
@@ -353,7 +366,14 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 		limit = 40
 	}
 	guard := &flexibleGuard{root: root, qa: qa, base: runtimeGuard{r}}
-	worker, err := agent.New(agent.Config{Assembly: assembly, Provider: r.Provider, Tools: registry, Guard: guard, MaxSteps: limit, MaxRetries: 2, MaxToolResultBytes: 16000}, session.New(nil))
+	run.StepLimit = limit
+	workerLog := session.New(nil)
+	worker, err := agent.New(agent.Config{Assembly: assembly, Provider: r.Provider, Tools: registry, Guard: guard, MaxSteps: limit, MaxRetries: 2, MaxToolResultBytes: 16000, OnStep: func(step int) {
+		run.StepsUsed = step
+		if limit >= 4 && step == limit-2 {
+			_, _ = workerLog.Append(session.EventUserMessage, session.Message{Role: session.RoleUser, Source: "runner", Content: []session.Block{session.Text("Runner budget notice: three model calls remain. Run final verification and return your report. If work remains, report concrete remaining work and blockers so a retry can continue from this branch.")}}, session.AppendOp())
+		}
+	}}, workerLog)
 	if err != nil {
 		return run, err
 	}
@@ -366,7 +386,18 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 		}
 	}
 	worker.SetUsageHook(usageHook)
+	recent := []string{}
 	worker.SetToolResultHook(func(call session.Block, value tools.Result) {
+		var args map[string]any
+		_ = json.Unmarshal(call.Arguments, &args)
+		target := text(args, "command")
+		if target == "" {
+			target = text(args, "path")
+		}
+		recent = append(recent, call.Name+" "+truncate(target, 160)+": "+truncate(resultText(value), 200))
+		if len(recent) > 4 {
+			recent = recent[len(recent)-4:]
+		}
 		if r.OnTool != nil {
 			r.progressMu.Lock()
 			r.OnTool(call, value)
@@ -377,6 +408,7 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 	if qa {
 		instruction = "Independently verify the supplied outcomes. Inspect the actual diff and source, look for regressions, missing behavior, weakened tests, and contradictory evidence. Run your own checks with verify; do not merely trust implementation reports. Do not edit application source. Finish ONLY with JSON {\"outcome\":\"completed\" or \"blocked\",\"summary\":\"...\",\"blockers\":[]}. Report concrete gaps, not assumed success.\n" + instruction
 	}
+	instruction += fmt.Sprintf(" Your budget is %d model steps; reserve the final steps for verification and a handoff. Fresh worktrees omit installed dependencies; install from the project manifests before testing. Verification output is already bounded: prefer unpiped checks, avoid head (which may interrupt the test), and rerun any failed check after repairs.", limit)
 	turn, runErr := worker.Run(ctx, instruction+"\n\n"+string(encoded))
 	if runErr == nil && reportOutcome(turn.Text) == "" {
 		repairAssembly := assembly
@@ -393,7 +425,10 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 	run.Output = truncate(turn.Text, 48000)
 	run.Status = "failed"
 	after, scanErr := sourceFiles(root)
-	if runErr != nil {
+	if errors.Is(runErr, agent.ErrStepLimit) {
+		run.StopReason = "step_limit"
+		run.Output = fmt.Sprintf("Worker reached its %d-step budget. Review and retry to continue from the preserved branch %s. Recent actions:\n%s", limit, job.branch, strings.Join(recent, "\n"))
+	} else if runErr != nil {
 		run.Output = runErr.Error()
 	} else if scanErr != nil {
 		run.Output = scanErr.Error()

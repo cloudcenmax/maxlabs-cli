@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { Agent,                 } from './agent.js';
+import { Agent, StepLimitError,                 } from './agent.js';
 import { workerAutoCommand } from './team-permissions.js';
 import { PermissionGuard, freshApprovalRisk } from './permission.js';
 import { SessionLog, SteeringQueue } from './session.js';
@@ -24,7 +24,7 @@ export async function runFlexibleWave(store          ,child          ,ids       
   for(const id of ids){const task=tasks.get(id) ,previous=state.runs[id],run        ={id:randomUUID(),status:'running',attempts:(previous?.attempts||0)+1,output:'',checks:[]};const path=`${dirname(execution.path).replaceAll('\\','/')}/workers/${id}-${run.id}`,root=await store.path(path,true),branch=`task-${id}-${run.id}`;
    if(previous&&!previous.commit&&previous.workspace){previous.commit=await checkpoint(await store.path(previous.workspace),`Preserve interrupted task ${id}`,signal);await store.persist(state);}
    const base=previous?.status!=='passed'&&previous?.commit?previous.commit:'HEAD';await git(integration,['worktree','add','-b',branch,root,base],signal);
-   const packet                   ={task,briefs,workspace:root,branch,implementation_evidence:evidence,previous_attempt:previous?{status:previous.status,summary:previous.output.slice(0,1600),branch:previous.branch}:undefined};
+   const packet                   ={task,briefs,workspace:root,branch,implementation_evidence:evidence,previous_attempt:previous?{status:previous.status,summary:previous.output.slice(0,1600),branch:previous.branch,stop_reason:previous.stop_reason,steps_used:previous.steps_used,checks:previous.checks.map(c=>({...c,output:c.output.slice(0,1600)}))}:undefined};
    if(base!=='HEAD'){try{await git(root,['merge','--no-edit',execution.commit ],signal);}catch{packet.merge_conflicts=await git(root,['diff','--name-only','--diff-filter=U'],signal);}}
    if(task.role==='qa')packet.change_summary=await git(root,['diff','--stat',execution.base_commit,'HEAD'],signal);
    Object.assign(run,{branch,workspace:path});state.runs[id]=run;jobs.push({id,task,run,root,packet});
@@ -34,7 +34,7 @@ export async function runFlexibleWave(store          ,child          ,ids       
   const results=await Promise.all(jobs.map(async job=>{const started=Date.now(); const {id,task,root}=job,run={...job.run,checks:[]                     };try{
     const before=await sourceFiles(root),prompt=JSON.stringify(job.packet);if(prompt.length>96000)throw new Error('Task brief exceeds context budget; split or shorten it');
     const record=async(command       ,result           )=>{const log=`.maxlabs/team/checks/${id}-${run.id}-${run.attempts}-${run.checks.length+1}.log`;const target=await store.path(log.slice('.maxlabs/team/'.length),true);await mkdir(dirname(target),{recursive:true});await writeFile(target,result.text.slice(0,200000),{mode:0o600});run.checks.push({command,passed:!result.isError,output:result.text.slice(0,8000),log});};
-    const report=await child(prompt,'worker',{...task,_flexible:true,_execution_path:run.workspace,_recordVerification:record,_recordUsage:(usage                 )=>{run.usage=usage;}},signal);run.output=report.text.slice(0,48000);const after=await sourceFiles(root);
+    const report=await child(prompt,'worker',{...task,_flexible:true,_execution_path:run.workspace,_recordVerification:record,_recordProgress:(steps       ,limit       )=>{run.steps_used=steps;run.step_limit=limit;},_recordStop:(reason       )=>{run.stop_reason=reason;},_recordUsage:(usage                 )=>{run.usage=usage;}},signal);run.output=report.text.slice(0,48000);const after=await sourceFiles(root);
     run.status=!report.isError&&completedReport(report.text)&&verified(run.checks)?'passed':'failed';
     if(task.role==='qa'&&!sameFiles(before,after)){run.status='failed';run.output='Independent QA changed application source; review these changes before retrying.';}
    }catch(error){run.status=signal?.aborted?'interrupted':'failed';run.output=String((error         ).message);}
@@ -62,20 +62,22 @@ export class FlexiblePermissions extends PermissionGuard {
   return;
  }
 }
-export async function flexibleChild(store          ,transport                 ,base                ,settings              ,workerModel       ,prompt       ,task                   ,signal             ,onTool                      )                    {
+export async function flexibleChild(store          ,transport                 ,base                ,settings              ,workerModel       ,prompt       ,task                   ,signal             ,onTool                      ,onChildUsage                       )                    {
  if(typeof task._recordVerification!=='function'||!task._execution_path) return {text:'Missing runner-owned verification recorder',isError:true};
  const usage={input_tokens:0,cached_input_tokens:0,output_tokens:0,reasoning_tokens:0,calls:0};
- const onUsage=(v    )=>{usage.input_tokens+=v.uncachedInputTokens+v.cacheReadTokens+v.cacheWriteTokens;usage.cached_input_tokens+=v.cacheReadTokens;usage.output_tokens+=v.outputTokens;usage.reasoning_tokens+=v.reasoningTokens;usage.calls++;task._recordUsage?.({...usage});};
+ const onUsage=(v    )=>{usage.input_tokens+=v.uncachedInputTokens+v.cacheReadTokens+v.cacheWriteTokens;usage.cached_input_tokens+=v.cacheReadTokens;usage.output_tokens+=v.outputTokens;usage.reasoning_tokens+=v.reasoningTokens;usage.calls++;task._recordUsage?.({...usage});onChildUsage?.(v);};
  const root=await store.path(task._execution_path),executionStore=new (store.constructor                    )(await Workspace.open(root));
  const registry=createTools(executionStore.workspace,{environment:workerEnvironment()}),tools=new ToolRegistry(),qa=task.role==='qa';
  for(const name of registry.names()){if(qa&&['write','edit'].includes(name))continue;tools.register(registry.get(name) );}
- const shell=registry.get('bash') ;tools.register({schema:{name:'verify',description:'Run a real outcome test, build, lint or acceptance command. The runner records actual exit status and output. Choose the project tooling; installation, version probes and skipped tests alone are not acceptance.',parameters:{type:'object',properties:{command:{type:'string'},timeout_ms:{type:'integer'}},required:['command'],additionalProperties:false}},readOnly:false,async execute(args,signal){const result=await shell.execute(args,signal);await task._recordVerification(String(args.command),result);return result;}});
- const guard=new FlexiblePermissions(executionStore,qa,base),agent=new Agent(new SessionLog(),transport,tools,guard,{...settings,model:workerModel||settings.model,maxSteps:Math.min(settings.maxSteps,40)},{onTool,onUsage,toolResultLimit:()=>16000});
+ const shell=registry.get('bash') ;tools.register({schema:{name:'verify',description:'Run a real outcome test, build, lint or acceptance command. The runner records actual exit status and output. Choose the project tooling; installation, version probes and skipped tests alone are not acceptance.',parameters:{type:'object',properties:{command:{type:'string'},timeout_ms:{type:'integer'}},required:['command'],additionalProperties:false}},readOnly:false,async execute(args,signal){const result=process.platform==='win32'&&String(args.command).includes('|')?{text:'MaxLabs verification requires an unpiped command on Windows so a failed test cannot be hidden by an output filter.',isError:true}:await shell.execute(args,signal);await task._recordVerification(String(args.command),result);return result;}});
+ const recent         =[],log=new SessionLog(),limit=Math.min(settings.maxSteps,40);
+ const onWorkerTool                     =(name,args,result)=>{recent.push(`${name} ${String(args.command||args.path||'').slice(0,160)}: ${result.text.slice(0,200)}`);if(recent.length>4)recent.shift();onTool?.(name,args,result);};
+ const guard=new FlexiblePermissions(executionStore,qa,base),agent=new Agent(log,transport,tools,guard,{...settings,model:workerModel||settings.model,maxSteps:Math.min(settings.maxSteps,40)},{onTool:onWorkerTool,onUsage,onStep:(step)=>{task._recordProgress?.(step,limit);if(limit>=4&&step===limit-2)log.append('steering',{role:'user',source:'runner',content:[{type:'text',text:'Runner budget notice: three model calls remain. Run final verification and return your report. If work remains, describe concrete remaining work so a retry can continue from this branch.'}]});},toolResultLimit:()=>16000});
  const instruction=`${qa?'Independently review source, diff, regressions, weakened tests and implementation evidence. Run your own verification. Do not edit application source.':'Deliver the supplied outcomes in your isolated Git working branch. You choose files, dependencies and commands. Inspect the repository and project instructions first.'} Listed read/write/check paths are suggestions, not an allowlist. Follow the approved stack and decisions; the specification wins over contradictory prose. Use official scaffolding tools and a staging directory when partial files prevent in-place setup. Preserve useful existing work. Use verify for real outcome checks so the runner records evidence. Keep test logs/reports in the system temporary directory or .cache so they do not alter delivery source. If the project uses .env, initialize it with cp -n .env.example .env and never print its contents. You may repair failures within this task. Do not publish, deploy, access other projects or alter workflow metadata. Finish ONLY JSON {"outcome":"completed" or "blocked","summary":"...","blockers":[]}; completed without passing recorded checks is blocked.`;
- try{let result=await agent.run(instruction+'\n\n'+prompt,new SteeringQueue(),signal);
+ try{let result=await agent.run(instruction+` Your budget is ${limit} model steps. Fresh worktrees omit installed dependencies; install from project manifests before testing. Output is bounded: prefer unpiped verification, avoid head, and rerun failed checks after repairs.`+'\n\n'+prompt,new SteeringQueue(),signal);
   if(!completedReport(result.text)&&!/^\s*\{/.test(result.text)){const repair=new Agent(new SessionLog(),transport,new ToolRegistry(),guard,{...settings,model:workerModel||settings.model,maxTokens:2048,maxSteps:1,webSearch:'off',webSearchUses:0},{onUsage});result=await repair.run('Format this report as ONLY JSON with outcome (completed or blocked), summary and blockers. Preserve its outcome and blockers; if ambiguous use blocked. No tools. Report:\n'+result.text.slice(0,16000),new SteeringQueue(),signal);}
   return {text:result.text,isError:!completedReport(result.text)};
- }catch(error){return {text:String((error         ).message),isError:true};}
+ }catch(error){if(error instanceof StepLimitError){task._recordStop?.('step_limit');return {text:`Worker reached its ${limit}-step budget. Review and retry to continue from the preserved branch. Recent actions:\n${recent.join('\n')}`,isError:true};}return {text:String((error         ).message),isError:true};}
 }
 
 

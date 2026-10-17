@@ -25,6 +25,11 @@ export interface TurnResult {
   webSearches: number;
 }
 
+export class StepLimitError extends Error {
+  readonly steps: number;
+  constructor(steps: number) { super(`Turn exceeded its ${steps}-step limit`); this.steps = steps; this.name = 'StepLimitError'; }
+}
+
 const toolOrder = ["read", "write", "edit", "glob", "grep", "bash", "webfetch", "delegate"];
 
 export class Agent {
@@ -102,7 +107,7 @@ export class Agent {
       }
       this.#admitSteering(steering);
     }
-    throw new Error(`Turn exceeded its ${this.settings.maxSteps}-step limit`);
+    throw new StepLimitError(this.settings.maxSteps);
   }
 
   #appendTool(callId: string, result: ToolResult): void {
@@ -147,7 +152,7 @@ export function systemPrompt(mode: "act" | "plan" | "auto"): string {
   ].join("\n\n");
 }
 
-function addUsage(left: Usage, right: Usage): Usage {
+export function addUsage(left: Usage, right: Usage): Usage {
   return {
     uncachedInputTokens: left.uncachedInputTokens + right.uncachedInputTokens,
     cacheReadTokens: left.cacheReadTokens + right.cacheReadTokens,

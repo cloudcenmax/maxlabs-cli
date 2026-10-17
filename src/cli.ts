@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import process from "node:process";
 import { createInterface, type Interface } from "node:readline";
-import { Agent, systemPrompt } from "./agent.ts";
+import { Agent, addUsage, systemPrompt } from "./agent.ts";
 import { defaultAuthStore, OAuthSession, type AccountContext, type StoredAccount } from "./auth.ts";
 import { defaultModel, resolveThinkingLevel } from "./commands.ts";
 import { type ApprovalAnswer, PermissionGuard, type Mode } from "./permission.ts";
@@ -13,6 +13,7 @@ import { TeamStore, runApprovedTasks, environmentCommands, allowedCheck, createT
 import { referenceNamed } from "./team-reference.ts";
 import { TeamPreview } from "./team-preview.ts";
 import { teamStatusText, teamArtifactText, teamNext } from "./team-view.ts";
+import { emptyUsage } from "./types.ts";
 import type { AgentSettings, ModelCard, ToolResult } from "./types.ts";
 
 const ansi = process.stdout.isTTY;
@@ -193,7 +194,8 @@ async function main(): Promise<void> {
     maxSteps: options.maxSteps,
   };
   const tools = createTools(workspace);
-  const workflow = teamTool(teamStore, createTeamChild(teamStore, transport, guard, settings, () => teamWorkerModel, (name, args, result) => agentHooks.onTool(name, args, result)), async (command, signal) => {
+  let childUsage = emptyUsage();
+  const workflow = teamTool(teamStore, createTeamChild(teamStore, transport, guard, settings, () => teamWorkerModel, (name, args, result) => agentHooks.onTool(name, args, result), usage => { childUsage=addUsage(childUsage,usage); }), async (command, signal) => {
     if (guard.mode === "plan" && !environmentCommands.includes(command)) return { text: "Plan mode refuses task execution", isError: true };
     const tool = tools.get("bash")!;
     const args = { command, timeout_ms: 300_000 };
@@ -391,6 +393,7 @@ async function main(): Promise<void> {
     cancelPartialFlush();
     startStatus();
     try {
+      childUsage = emptyUsage();
       workflow.resetBudget();
       plannerFetches = 0;
       if (!teamMode && agent.log.events().some(e => e.message.content.some(b => b.type === "text" && b.text.includes("[team:instructions:v1]")))) text = "[Greenfield SDE Team is disabled for this turn. Follow ordinary CLI mode and tools.]\n\n" + text;
@@ -417,8 +420,9 @@ async function main(): Promise<void> {
         const seconds = reasoningStarted ? ((Date.now() - reasoningStarted) / 1_000).toFixed(1) : "0.0";
         process.stdout.write(`\n${ui.thought(`✻ thought for ${seconds}s · ${result.usage.reasoningTokens} tokens`)}\n`);
       }
-      const billed = result.usage.cacheReadTokens + result.usage.cacheWriteTokens + result.usage.uncachedInputTokens;
-      const hit = billed ? Math.round(result.usage.cacheReadTokens / billed * 100) : 0;
+      const combined = addUsage(result.usage, childUsage);
+      const billed = combined.cacheReadTokens + combined.cacheWriteTokens + combined.uncachedInputTokens;
+      const hit = billed ? Math.round(combined.cacheReadTokens / billed * 100) : 0;
       process.stdout.write(`\n${ui.tone(`[${result.steps} step(s), ${result.toolCalls} tool call(s), cache hit ${hit}%]`)}\n\n`);
       if (teamMode) process.stdout.write(ui.tone(teamNext(await teamStore.status())) + "\n\n");
       router.restoreExternalInput(restoreInput);
@@ -433,9 +437,10 @@ async function main(): Promise<void> {
   }
 
   async function executeApproved(): Promise<void> {
+    childUsage = emptyUsage();
     router.busy = true; activeAbort = new AbortController();
     try { process.stdout.write((await runApprovedTasks(teamStore, workflow, activeAbort.signal, () => { const directions = router.steering.drain(); if (directions.length) { for (const text of directions) agent.log.append("steering", { role: "user", content: [{ type: "text", text }], source: "user" }); throw new Error("Execution stopped before the next task to review the new direction: " + directions.join("\n") + ". Update and review affected contracts before continuing."); } }, event => { clearStatus(); process.stdout.write(`${event.status === "passed" ? ui.success("✓") : ui.brand("→")} ${event.completed}/${event.total} · ${event.summary}\n`); })) + "\n"); }
-    finally { clearStatus(); router.busy = false; activeAbort = undefined; process.stdout.write(teamStatusText(await teamStore.status()) + "\n"); }
+    finally { clearStatus(); router.busy = false; activeAbort = undefined; process.stdout.write(teamStatusText(await teamStore.status()) + "\n"); const input=childUsage.uncachedInputTokens+childUsage.cacheReadTokens+childUsage.cacheWriteTokens; if(input)process.stdout.write(ui.tone(`[${input.toLocaleString()} input tokens · ${childUsage.outputTokens.toLocaleString()} output tokens · cache hit ${Math.round(childUsage.cacheReadTokens/input*100)}%]`)+"\n"); }
   }
 
   async function command(text: string): Promise<boolean> {

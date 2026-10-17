@@ -38,7 +38,7 @@ type BashTool struct {
 
 // NewBashTool returns a shell tool bound to a workspace.
 func NewBashTool(ws *Workspace) *BashTool {
-	shell := "/bin/sh"
+	shell := "/bin/bash"
 	if runtime.GOOS == "windows" {
 		shell = os.Getenv("ComSpec")
 		if shell == "" {
@@ -53,7 +53,7 @@ func (t *BashTool) Definition() Definition {
 	return Definition{
 		Name: "bash",
 		Description: "Run a shell command in the workspace root. Returns the combined output and " +
-			"the exit code. Long output is truncated from the middle; a failing command is " +
+			"the exit code. Pipelines fail when any stage fails. Long output is truncated from the middle; a failing command is " +
 			"reported as a result, not as an error.",
 		Parameters: json.RawMessage(`{
 			"type": "object",
@@ -93,7 +93,7 @@ func (t *BashTool) Execute(ctx context.Context, raw json.RawMessage) (Result, er
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	shellArgs := []string{"-c", args.Command}
+	shellArgs := []string{"-o", "pipefail", "-c", args.Command}
 	if runtime.GOOS == "windows" {
 		shellArgs = []string{"/d", "/s", "/c", args.Command}
 	}

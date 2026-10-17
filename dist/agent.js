@@ -25,6 +25,11 @@ import { emptyUsage } from "./types.js";
 
 
 
+export class StepLimitError extends Error {
+           steps        ;
+  constructor(steps        ) { super(`Turn exceeded its ${steps}-step limit`); this.steps = steps; this.name = 'StepLimitError'; }
+}
+
 const toolOrder = ["read", "write", "edit", "glob", "grep", "bash", "webfetch", "delegate"];
 
 export class Agent {
@@ -102,7 +107,7 @@ export class Agent {
       }
       this.#admitSteering(steering);
     }
-    throw new Error(`Turn exceeded its ${this.settings.maxSteps}-step limit`);
+    throw new StepLimitError(this.settings.maxSteps);
   }
 
   #appendTool(callId        , result            )       {
@@ -147,7 +152,7 @@ export function systemPrompt(mode                         )         {
   ].join("\n\n");
 }
 
-function addUsage(left       , right       )        {
+export function addUsage(left       , right       )        {
   return {
     uncachedInputTokens: left.uncachedInputTokens + right.uncachedInputTokens,
     cacheReadTokens: left.cacheReadTokens + right.cacheReadTokens,

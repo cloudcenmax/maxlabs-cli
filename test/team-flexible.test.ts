@@ -69,3 +69,19 @@ test('retry recovers uncommitted files left by a stopped older worker',async()=>
  const {store,root,child}=await seed();const tool=teamTool(store,async()=>({text:'blocked',isError:true}),async()=>({text:'unused'}));await tool.runBatch(['alpha']);const state=await store.load(),run=state.runs.alpha,oldRoot=await store.path(run.workspace!);await writeFile(join(oldRoot,'recovered.mjs'),'export const recovered=true;');delete run.commit;run.status='interrupted';await store.persist(state);
  const resumed=await teamTool(store,child,async()=>({text:'unused'})).runBatch(['alpha']);assert.equal(resumed.isError,false,resumed.text);const s=await store.status();assert.match(await readFile(join(await store.path(s.execution!.path),'recovered.mjs'),'utf8'),/recovered/);await assert.rejects(readFile(join(root,'recovered.mjs')),{code:'ENOENT'});
 });
+
+test('failing piped verification cannot merge a worker branch',async()=>{
+ const {store}=await seed();const {createTeamChild}=await import('../src/greenfield.ts');const {PermissionGuard}=await import('../src/permission.ts');let calls=0;
+ const transport:any={async complete(){calls++;return {message:{role:'assistant',content:calls===1?[{type:'tool_call',callId:'verify',name:'verify',arguments:JSON.stringify({command:'false 2>&1 | tail -20'})}]:[{type:'text',text:report.text}]},usage:{uncachedInputTokens:10,cacheReadTokens:90,cacheWriteTokens:0,outputTokens:5,reasoningTokens:0,webSearches:0}};}};
+ const child=createTeamChild(store,transport,new PermissionGuard('auto',async()=> 'deny'),{model:'worker',maxSteps:3,maxTokens:1024,thinking:'minimal',webSearch:'off',webSearchUses:0});
+ const result=await teamTool(store,child,async()=>({text:'unused'})).runBatch(['alpha']);assert.equal(result.isError,true);const run=(await store.status()).runs.alpha;assert.equal(run.status,'failed');assert.equal(run.merged,undefined);assert.equal(run.checks[0].passed,false);
+});
+test('budget stop saves a useful handoff and retry resumes the preserved branch',async()=>{
+ const {store}=await seed();const {createTeamChild}=await import('../src/greenfield.ts');const {PermissionGuard}=await import('../src/permission.ts');let calls=0,usageCalls=0,resume=false,sawHandoff=false;
+ const usage={uncachedInputTokens:10,cacheReadTokens:90,cacheWriteTokens:0,outputTokens:5,reasoningTokens:0,webSearches:0};
+ const transport:any={async complete(request:any){calls++;if(resume&&JSON.stringify(request.messages).includes('step_limit'))sawHandoff=true;const content=resume?(calls===1?[{type:'tool_call',callId:'verify',name:'verify',arguments:JSON.stringify({command:'test -f partial.txt'})}]:[{type:'text',text:report.text}]):[{type:'tool_call',callId:'work-'+calls,name:calls===1?'write':'verify',arguments:JSON.stringify(calls===1?{path:'partial.txt',content:'preserved work'}:{command:"printf 'MaxLabs progress'"})}];return {message:{role:'assistant',content},usage};}};
+ const settings:any={model:'worker',maxSteps:2,maxTokens:1024,thinking:'minimal',webSearch:'off',webSearchUses:0};const guard=new PermissionGuard('auto',async()=> 'deny');
+ let child=createTeamChild(store,transport,guard,settings,()=>'',undefined,()=>{usageCalls++;});let result=await teamTool(store,child,async()=>({text:'unused'})).runBatch(['alpha']);assert.equal(result.isError,true);
+ const paused=(await store.status()).runs.alpha;assert.equal(paused.stop_reason,'step_limit');assert.equal(paused.steps_used,2);assert.equal(paused.step_limit,2);assert.ok(paused.commit);assert.match(paused.output,/partial.txt/);assert.equal(usageCalls,2);
+ resume=true;calls=0;child=createTeamChild(store,transport,guard,{...settings,maxSteps:3});result=await teamTool(store,child,async()=>({text:'unused'})).runBatch(['alpha']);assert.equal(result.isError,false,result.text);assert.equal(sawHandoff,true);assert.equal((await store.status()).runs.alpha.merged,true);
+});
