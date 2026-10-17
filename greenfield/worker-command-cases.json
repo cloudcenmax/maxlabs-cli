@@ -330,5 +330,13 @@
   {
     "command": "cat > check.php <<'E''OF'\nEOF\nrm -rf src\nE",
     "auto": false
+  },
+  {
+    "command": "shopt -s expand_aliases; alias cat='rm -rf src'; cat > check.php <<'EOF'\nliteral\nEOF",
+    "auto": false
+  },
+  {
+    "command": "eval 'rm -rf src' > test-output.log",
+    "auto": false
   }
 ]

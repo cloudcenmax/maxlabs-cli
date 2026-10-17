@@ -179,6 +179,7 @@ export async function workerAutoCommand(root        , command        )          
   // A later cwd change would invalidate destination checks made from root.
   for (const [i,part] of parts.entries()) {
     if (i>0 && !['|',';','\n','&&','||'].includes(parts[i-1][0])) continue;
+    if (['eval','exec','source','.','alias','unalias','shopt','enable'].includes(word(part[0]))) return;
     if (['cd','pushd','popd'].includes(word(part[0])) && !ranges.some(([start,end])=>part.index>=start && part.index+part[0].length<=end)) return;
   }
   // Normalize literal command names/flags before auditing quoted or escaped

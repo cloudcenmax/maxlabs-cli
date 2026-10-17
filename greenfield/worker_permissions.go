@@ -435,6 +435,10 @@ func workerAutoCommand(root, command string) (string, bool) {
 			continue
 		}
 		name := workerShellWord(command[part[0]:part[1]])
+		switch name {
+		case "eval", "exec", "source", ".", "alias", "unalias", "shopt", "enable":
+			return "", false
+		}
 		if name != "cd" && name != "pushd" && name != "popd" {
 			continue
 		}
