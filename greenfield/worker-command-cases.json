@@ -1,0 +1,138 @@
+[
+  {
+    "command": "php artisan test 2>&1 | tail -60",
+    "auto": true
+  },
+  {
+    "command": "php artisan test > test-output.log 2>&1",
+    "auto": true
+  },
+  {
+    "command": "npm test >> 'test output.log'",
+    "auto": true
+  },
+  {
+    "command": "npm run build >/dev/null 2>&1",
+    "auto": true
+  },
+  {
+    "command": "npm test &> test-output.log",
+    "auto": true
+  },
+  {
+    "command": "go test ./... > {tmp}/team-test.log",
+    "auto": true
+  },
+  {
+    "command": "php artisan test 2>/tmp/team-test-output.log | tail -50",
+    "auto": true
+  },
+  {
+    "command": "npm test > {root}/test-output.log",
+    "auto": true
+  },
+  {
+    "command": "npm test > ../outside.log",
+    "auto": false
+  },
+  {
+    "command": "npm test > /etc/test-output.log",
+    "auto": false
+  },
+  {
+    "command": "npm test > .env",
+    "auto": false
+  },
+  {
+    "command": "npm test > .maxlabs/team/state.json",
+    "auto": false
+  },
+  {
+    "command": "npm test > .git/config",
+    "auto": false
+  },
+  {
+    "command": "npm test > .aws/credentials",
+    "auto": false
+  },
+  {
+    "command": "npm test > escape/test-output.log",
+    "auto": false
+  },
+  {
+    "command": "npm test > quoted-escape/test-output.log",
+    "auto": false
+  },
+  {
+    "command": "npm test > link-to-secret.log",
+    "auto": false
+  },
+  {
+    "command": "npm test > test-output.log && rm -rf src",
+    "auto": false
+  },
+  {
+    "command": "npm test > test-output.log && git push origin main",
+    "auto": false
+  },
+  {
+    "command": "npm test > test-output.log && npm publish",
+    "auto": false
+  },
+  {
+    "command": "node -e 'process.exit(0)' > test-output.log",
+    "auto": false
+  },
+  {
+    "command": "php artisan test > $(echo test-output.log)",
+    "auto": false
+  },
+  {
+    "command": "npm test > $HOME/test-output.log",
+    "auto": false
+  },
+  {
+    "command": "npm test > 'unclosed",
+    "auto": false
+  },
+  {
+    "command": "npm test >",
+    "auto": false
+  },
+  {
+    "command": "cd {root} && php artisan test > test-output.log 2>&1",
+    "auto": true
+  },
+  {
+    "command": "cd '{root}' && npm test 2>&1 | tail -20",
+    "auto": true
+  },
+  {
+    "command": "cd /etc && npm test > test-output.log",
+    "auto": false
+  },
+  {
+    "command": "cd {root} && npm test > test-output.log && rm -rf src",
+    "auto": false
+  },
+  {
+    "command": "cat .env > test-output.log",
+    "auto": false
+  },
+  {
+    "command": "cd {root} && cp .env.example .env && php artisan key:generate",
+    "auto": true
+  },
+  {
+    "command": "cp -n .env.example .env && php artisan test 2>&1",
+    "auto": true
+  },
+  {
+    "command": "cat .env > /tmp/team-env-output.log",
+    "auto": false
+  },
+  {
+    "command": "cp .env .env.example",
+    "auto": false
+  }
+]

@@ -36,6 +36,12 @@ a scrubbed provider-credential environment, approved briefs and previous evidenc
 Context is bounded to 96 KB and tool results to 16 KB. Runtime dependencies and
 local environment setup must be installed in worktrees; these are not shared.
 
+Team mode uses Auto permissions. Routine test output redirection within a worker
+folder or to temporary log/report files does not ask for repeated approval.
+Repeating the assigned working directory and initializing a missing worker .env
+from .env.example are also routine; overwriting configured environments, path
+escapes, destructive commands and publication retain ordinary review.
+
 The `verify` tool records actual command results; a completed JSON report alone
 cannot pass a task. Workers choose the real tests and may repair failures.
 Successful implementation branches merge serially with Git. Conflicts abort the

@@ -91,7 +91,7 @@ func (p *flexibleProvider) Complete(_ context.Context, req wire.Request) (llm.Re
 	time.Sleep(40 * time.Millisecond)
 	defer func() { p.mu.Lock(); p.active--; p.mu.Unlock() }()
 	calls := []session.Block{}
-	command := "node --test acceptance.test.mjs"
+	command := "node --test acceptance.test.mjs 2>&1"
 	if id != "qa" || p.mutateQA {
 		file := id + ".mjs"
 		if p.conflict {
@@ -99,7 +99,7 @@ func (p *flexibleProvider) Complete(_ context.Context, req wire.Request) (llm.Re
 		}
 		args, _ := json.Marshal(map[string]string{"path": file, "content": "export const value = '" + id + "';\n"})
 		calls = append(calls, session.ToolCall("write-"+id, "write", args))
-		command = "node --check " + file
+		command = "node --check " + file + " > test-output.log 2>&1"
 	}
 	args, _ := json.Marshal(map[string]string{"command": command})
 	calls = append(calls, session.ToolCall("verify-"+id, "verify", args))
@@ -248,5 +248,35 @@ func TestFlexibleFoundationCanFollowSharedSetup(t *testing.T) {
 	status, _ := s.Status(nil)
 	if len(status.Errors) > 0 {
 		t.Fatal(status.Errors)
+	}
+}
+func TestRetryRecoversInterruptedUncommittedWork(t *testing.T) {
+	s := flexibleSeed(t)
+	r := runtime(t, s, false)
+	r.Provider = &flexibleProvider{missing: true}
+	if _, e := r.runFlexible(context.Background(), "alpha"); e != nil {
+		t.Fatal(e)
+	}
+	state, _ := s.Load()
+	run := state.Runs["alpha"]
+	oldRoot, _ := s.Path(run.Workspace)
+	if e := os.WriteFile(filepath.Join(oldRoot, "recovered.mjs"), []byte("export const recovered=true;"), 0644); e != nil {
+		t.Fatal(e)
+	}
+	run.Commit = ""
+	run.Status = "interrupted"
+	if e := s.Persist(&state); e != nil {
+		t.Fatal(e)
+	}
+	r = runtime(t, s, false)
+	r.Provider = &flexibleProvider{}
+	result, e := r.runFlexible(context.Background(), "alpha")
+	if e != nil || result.IsError {
+		t.Fatal(e, resultText(result))
+	}
+	state, _ = s.Load()
+	root, _ := s.Path(state.Execution.Path)
+	if _, e = os.Stat(filepath.Join(root, "recovered.mjs")); e != nil {
+		t.Fatal("interrupted work lost", e)
 	}
 }

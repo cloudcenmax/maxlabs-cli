@@ -18,7 +18,7 @@ import (
 
 // Broad project commands are allowed after plan approval. High-impact operations
 // still use the ordinary approval guard; this is Git isolation, not an OS sandbox.
-var outsideCommand = regexp.MustCompile(`(?i)(\.\.[/\\]|~[/\\]|/(?:Users|home|etc|root|private|tmp|var|Applications|Volumes)/|\b(?:curl|wget|ssh|scp|sftp|rsync|security|sudo)\b|\.maxlabs|\.git[/\\])`)
+var outsideCommand = regexp.MustCompile(`(?i)(\.\.[/\\]|~[/\\]|/(?:Users|home|etc|root|private|tmp|var|Applications|Volumes)(?:[/\s]|$)|\b(?:curl|wget|ssh|scp|sftp|rsync|security|sudo)\b|\.maxlabs|\.git[/\\]|\b(?:npm|pnpm|yarn|bun)\s+publish\b)`)
 
 type flexibleGuard struct {
 	root    string
@@ -57,8 +57,10 @@ func (g *flexibleGuard) Permit(ctx context.Context, name string, args json.RawMe
 		if decision.RefusedNow() {
 			return decision.Explain(), nil
 		}
-		fresh, _ := audit.RequiresFreshApproval("bash", normalized)
-		if fresh || outsideCommand.MatchString(text(input, "command")) {
+		assessed, local := workerAutoCommand(g.root, text(input, "command"))
+		assessment, _ := json.Marshal(map[string]any{"command": assessed})
+		fresh, _ := audit.RequiresFreshApproval("bash", assessment)
+		if !local || fresh || outsideCommand.MatchString(assessed) {
 			if g.base != nil {
 				return g.base.Permit(ctx, "bash", normalized, false, t)
 			}
@@ -187,6 +189,21 @@ func (r *Runtime) runFlexibleWave(ctx context.Context, ids []string) (tools.Resu
 				return err
 			}
 			branch := "task-" + id + "-" + run.ID
+			// A stopped older build may have left work uncommitted. Preserve it
+			// before branching a retry instead of silently starting from integration.
+			if previous != nil && previous.Commit == "" && previous.Workspace != "" {
+				oldRoot, e := r.Store.Path(previous.Workspace)
+				if e != nil {
+					return e
+				}
+				previous.Commit, e = checkpoint(ctx, oldRoot, &ExecutionWorkspace{}, "Preserve interrupted task "+id)
+				if e != nil {
+					return fmt.Errorf("preserve interrupted task %s: %w", id, e)
+				}
+				if e = r.Store.Persist(state); e != nil {
+					return e
+				}
+			}
 			base := "HEAD"
 			if previous != nil && previous.Status != "passed" && previous.Commit != "" {
 				base = previous.Commit
@@ -356,7 +373,7 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 			r.progressMu.Unlock()
 		}
 	})
-	instruction := "Deliver the supplied outcomes in this isolated Git working branch. Inspect the actual repository and project instructions. You choose files, implementation, dependency installation, and shell commands; listed read/write/check paths are suggestions, not a file allowlist. Use the approved stack and decisions; when prose conflicts, the approved specification wins. Scaffold using official tools in staging if an existing partial project prevents an in-place generator; preserve useful existing work. You may investigate and repair test failures within this task. Do not publish, deploy, change workflow metadata, or access other projects. Use verify for real outcome checks; its output is recorded by the runner. Finish ONLY with JSON {\"outcome\":\"completed\" or \"blocked\",\"summary\":\"...\",\"blockers\":[]}. A completed report without recorded passing verification is blocked."
+	instruction := "Deliver the supplied outcomes in this isolated Git working branch. Inspect the actual repository and project instructions. You choose files, implementation, dependency installation, and shell commands; listed read/write/check paths are suggestions, not a file allowlist. Use the approved stack and decisions; when prose conflicts, the approved specification wins. Scaffold using official tools in staging if an existing partial project prevents an in-place generator; preserve useful existing work. You may investigate and repair test failures within this task. Do not publish, deploy, change workflow metadata, or access other projects. Use verify for real outcome checks; its output is recorded by the runner. Keep test logs/reports in the system temporary directory or .cache so they do not alter delivery source. If the project uses .env, initialize it with cp -n .env.example .env rather than overwriting existing configuration; never print its contents. Finish ONLY with JSON {\"outcome\":\"completed\" or \"blocked\",\"summary\":\"...\",\"blockers\":[]}. A completed report without recorded passing verification is blocked."
 	if qa {
 		instruction = "Independently verify the supplied outcomes. Inspect the actual diff and source, look for regressions, missing behavior, weakened tests, and contradictory evidence. Run your own checks with verify; do not merely trust implementation reports. Do not edit application source. Finish ONLY with JSON {\"outcome\":\"completed\" or \"blocked\",\"summary\":\"...\",\"blockers\":[]}. Report concrete gaps, not assumed success.\n" + instruction
 	}

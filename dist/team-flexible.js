@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Agent,                 } from './agent.js';
+import { workerAutoCommand } from './team-permissions.js';
 import { PermissionGuard, freshApprovalRisk } from './permission.js';
 import { SessionLog, SteeringQueue } from './session.js';
 import { Workspace, createTools, ToolRegistry,           } from './tools.js';
@@ -9,7 +10,7 @@ import { Workspace, createTools, ToolRegistry,           } from './tools.js';
 
 import { completedReport,                                              } from './greenfield.js';
 import { checkpoint, git, prepareExecution, sourceFiles, sameFiles, workerEnvironment } from './team-workspace.js';
-const outside=/(\.\.[/\\]|~[/\\]|\/(Users|home|etc|root|private|tmp|var|Applications|Volumes)\/|\b(curl|wget|ssh|scp|sftp|rsync|security|sudo)\b|\.maxlabs|\.git[/\\])/i;
+const outside=/(\.\.[/\\]|~[/\\]|\/(Users|home|etc|root|private|tmp|var|Applications|Volumes)(?:[/\s]|$)|\b(curl|wget|ssh|scp|sftp|rsync|security|sudo)\b|\.maxlabs|\.git[/\\]|(?:^|[\s/])\.env(?:[\s.]|$)|\b(?:npm|pnpm|yarn|bun)\s+publish\b)/i;
 function verified(checks                  )         {const latest=new Map(checks.map(c=>[c.command,c.passed]));return latest.size>0&&[...latest.values()].every(Boolean);}
 export async function runFlexibleWave(store          ,child          ,ids         ,signal             )                    {
  return store.locked(async state=>{
@@ -21,6 +22,7 @@ export async function runFlexibleWave(store          ,child          ,ids       
   const evidence=Object.fromEntries(Object.entries(state.runs).map(([id,run])=>[id,{status:run.status,summary:run.output.slice(0,1000),checks:run.checks.map(c=>({...c,output:c.output.slice(0,1600)})),branch:run.branch}]));
   const jobs=[];
   for(const id of ids){const task=tasks.get(id) ,previous=state.runs[id],run        ={id:randomUUID(),status:'running',attempts:(previous?.attempts||0)+1,output:'',checks:[]};const path=`${dirname(execution.path).replaceAll('\\','/')}/workers/${id}-${run.id}`,root=await store.path(path,true),branch=`task-${id}-${run.id}`;
+   if(previous&&!previous.commit&&previous.workspace){previous.commit=await checkpoint(await store.path(previous.workspace),`Preserve interrupted task ${id}`,signal);await store.persist(state);}
    const base=previous?.status!=='passed'&&previous?.commit?previous.commit:'HEAD';await git(integration,['worktree','add','-b',branch,root,base],signal);
    const packet                   ={task,briefs,workspace:root,branch,implementation_evidence:evidence,previous_attempt:previous?{status:previous.status,summary:previous.output.slice(0,1600),branch:previous.branch}:undefined};
    if(base!=='HEAD'){try{await git(root,['merge','--no-edit',execution.commit ],signal);}catch{packet.merge_conflicts=await git(root,['diff','--name-only','--diff-filter=U'],signal);}}
@@ -49,14 +51,14 @@ export async function runFlexibleWave(store          ,child          ,ids       
   return {text:JSON.stringify({results:results.map(({id,run})=>({id,status:run.status,branch:run.branch,merged:run.merged,output:run.output.slice(0,1600),checks:run.checks.map(c=>({...c,output:c.output.slice(0,1000)}))})),workspace:integration,branch:execution.branch}),isError:results.some(({run})=>run.status!=='passed')};
  });
 }
-class FlexiblePermissions extends PermissionGuard {
+export class FlexiblePermissions extends PermissionGuard {
           rootStore          ;         qa        ;         base                ;fetches=0;
  constructor(store          ,qa        ,base                ){super('auto',base.prompt);this.rootStore=store;this.qa=qa;this.base=base;}
  async permit(tool     ,args                       )                          {const name=tool.schema.name;
   if(['write','edit'].includes(name)){if(this.qa)return 'Independent QA cannot edit application source';try{await this.rootStore.workerPath(String(args.path||''));return;}catch(error){return String(error);}}
   if(name==='read'){try{await this.rootStore.workerPath(String(args.path||''));return;}catch(error){return String(error);}}
   if(name==='webfetch'){if(++this.fetches>6)return 'Documentation budget reached';return;}
-  if(name==='bash'||name==='verify'){if(freshApprovalRisk('bash',args)||outside.test(String(args.command||'')))return this.base.permit({...tool,schema:{...tool.schema,name:'bash'}},args);return;}
+  if(name==='bash'||name==='verify'){const assessed=await workerAutoCommand(this.rootStore.workspace.root,String(args.command||''));if(!assessed||freshApprovalRisk('bash',{command:assessed})||outside.test(assessed))return this.base.permit({...tool,schema:{...tool.schema,name:'bash'}},args);return;}
   return;
  }
 }
@@ -69,7 +71,7 @@ export async function flexibleChild(store          ,transport                 ,b
  for(const name of registry.names()){if(qa&&['write','edit'].includes(name))continue;tools.register(registry.get(name) );}
  const shell=registry.get('bash') ;tools.register({schema:{name:'verify',description:'Run a real outcome test, build, lint or acceptance command. The runner records actual exit status and output. Choose the project tooling; installation, version probes and skipped tests alone are not acceptance.',parameters:{type:'object',properties:{command:{type:'string'},timeout_ms:{type:'integer'}},required:['command'],additionalProperties:false}},readOnly:false,async execute(args,signal){const result=await shell.execute(args,signal);await task._recordVerification(String(args.command),result);return result;}});
  const guard=new FlexiblePermissions(executionStore,qa,base),agent=new Agent(new SessionLog(),transport,tools,guard,{...settings,model:workerModel||settings.model,maxSteps:Math.min(settings.maxSteps,40)},{onTool,onUsage,toolResultLimit:()=>16000});
- const instruction=`${qa?'Independently review source, diff, regressions, weakened tests and implementation evidence. Run your own verification. Do not edit application source.':'Deliver the supplied outcomes in your isolated Git working branch. You choose files, dependencies and commands. Inspect the repository and project instructions first.'} Listed read/write/check paths are suggestions, not an allowlist. Follow the approved stack and decisions; the specification wins over contradictory prose. Use official scaffolding tools and a staging directory when partial files prevent in-place setup. Preserve useful existing work. Use verify for real outcome checks so the runner records evidence. You may repair failures within this task. Do not publish, deploy, access other projects or alter workflow metadata. Finish ONLY JSON {"outcome":"completed" or "blocked","summary":"...","blockers":[]}; completed without passing recorded checks is blocked.`;
+ const instruction=`${qa?'Independently review source, diff, regressions, weakened tests and implementation evidence. Run your own verification. Do not edit application source.':'Deliver the supplied outcomes in your isolated Git working branch. You choose files, dependencies and commands. Inspect the repository and project instructions first.'} Listed read/write/check paths are suggestions, not an allowlist. Follow the approved stack and decisions; the specification wins over contradictory prose. Use official scaffolding tools and a staging directory when partial files prevent in-place setup. Preserve useful existing work. Use verify for real outcome checks so the runner records evidence. Keep test logs/reports in the system temporary directory or .cache so they do not alter delivery source. If the project uses .env, initialize it with cp -n .env.example .env and never print its contents. You may repair failures within this task. Do not publish, deploy, access other projects or alter workflow metadata. Finish ONLY JSON {"outcome":"completed" or "blocked","summary":"...","blockers":[]}; completed without passing recorded checks is blocked.`;
  try{let result=await agent.run(instruction+'\n\n'+prompt,new SteeringQueue(),signal);
   if(!completedReport(result.text)&&!/^\s*\{/.test(result.text)){const repair=new Agent(new SessionLog(),transport,new ToolRegistry(),guard,{...settings,model:workerModel||settings.model,maxTokens:2048,maxSteps:1,webSearch:'off',webSearchUses:0},{onUsage});result=await repair.run('Format this report as ONLY JSON with outcome (completed or blocked), summary and blockers. Preserve its outcome and blockers; if ambiguous use blocked. No tools. Report:\n'+result.text.slice(0,16000),new SteeringQueue(),signal);}
   return {text:result.text,isError:!completedReport(result.text)};
