@@ -206,5 +206,121 @@
   {
     "command": "test -f /etc/.env && cat /etc/.env",
     "auto": false
+  },
+  {
+    "command": "cd '{root}' && sed -i '' 's/$seats/$activeSeats/g' tests/Feature/SeatBillingTest.php && php artisan test > .cache/test.log 2>&1",
+    "auto": true
+  },
+  {
+    "command": "printf \"\\$literal\\n\" > test-output.log",
+    "auto": true
+  },
+  {
+    "command": "printf 'PHP $variable and \\\\ namespace' > test\\ output.log",
+    "auto": true
+  },
+  {
+    "command": "cat > check.php <<'PHP'\n<?php\n$seats = \\App\\Models\\Seat::count();\nPHP\nphp artisan test > test-output.log 2>&1",
+    "auto": true
+  },
+  {
+    "command": "cat <<'PHP' > check.php\n<?php echo \"test\";\nPHP\nphp -l check.php 2>&1",
+    "auto": true
+  },
+  {
+    "command": "cat > check.php <<'PHP'\n<?php $text = '$(rm -rf /)';\nPHP\nphp artisan test > test-output.log",
+    "auto": true
+  },
+  {
+    "command": "cat > check.php <<'PHP'\n<?php\nPHP\nrm -rf src > test-output.log",
+    "auto": false
+  },
+  {
+    "command": "bash > test-output.log <<'SH'\nrm -rf src\nSH",
+    "auto": false
+  },
+  {
+    "command": "cat > check.php <<PHP\n$(rm -rf src)\nPHP",
+    "auto": false
+  },
+  {
+    "command": "cat > check.php <<'PHP'\n<?php\n",
+    "auto": false
+  },
+  {
+    "command": "cat > check.php # <<'PHP'\nrm -rf src\nPHP",
+    "auto": false
+  },
+  {
+    "command": "cat > .git/config <<'DATA'\ninvalid\nDATA",
+    "auto": false
+  },
+  {
+    "command": "cat > escape/check.php <<'PHP'\n<?php\nPHP",
+    "auto": false
+  },
+  {
+    "command": "cat > /etc/test-output.log <<'DATA'\ninvalid\nDATA",
+    "auto": false
+  },
+  {
+    "command": "npm test > ~/test-output.log",
+    "auto": false
+  },
+  {
+    "command": "npm test > .e\\nv",
+    "auto": false
+  },
+  {
+    "command": "npm test > \"$(echo test-output.log)\"",
+    "auto": false
+  },
+  {
+    "command": "php artisan test < input.txt > test-output.log",
+    "auto": false
+  },
+  {
+    "command": "cat > check.php <<'PHP' | bash\nrm -rf src\nPHP",
+    "auto": false
+  },
+  {
+    "command": "cat > check.php <<'PHP'\n<?php\nPHP\ngit push origin main > test-output.log",
+    "auto": false
+  },
+  {
+    "command": "php artisan test > .en[v]",
+    "auto": false
+  },
+  {
+    "command": "php artisan test > test-output.log && r\\m -rf src",
+    "auto": false
+  },
+  {
+    "command": "php artisan test > test-output.log && 'rm' -rf src",
+    "auto": false
+  },
+  {
+    "command": "cat > check.php <<'PHP'\n<?php\nPHP\ngit pu'sh' origin main > test-output.log",
+    "auto": false
+  },
+  {
+    "command": "cu'rl' https://example.com > test-output.log",
+    "auto": false
+  },
+  {
+    "command": "cat '.e'nv > test-output.log",
+    "auto": false
+  },
+  {
+    "command": "cd escape && npm test > test-output.log",
+    "auto": false
+  },
+  {
+    "command": "cd {root} && cd escape && npm test > test-output.log",
+    "auto": false
+  },
+  {
+    "command": "pushd escape; npm test > test-output.log",
+    "auto": false
   }
 ]

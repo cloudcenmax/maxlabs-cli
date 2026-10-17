@@ -31,3 +31,16 @@ test('reported inspection command executes without prompting or reading environm
  const command='ls -la .env 2>/dev/null; ls tests; cat tests/Feature/SeatsAndInvitesTest.php tests/Feature/SeatBillingTest.php | head -200',shell=createTools(workspace).get('bash')!;
  assert.equal(await guard.permit(shell,{command}),undefined);const result=await shell.execute({command});assert.equal(result.isError,false,result.text);assert.equal(prompts,0);assert.match(result.text,/seat test fixture/);assert.doesNotMatch(result.text,/DO_NOT_PRINT_ENV_VALUE/);
 });
+
+test('literal worker file payload executes unchanged without prompting',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'team-literal-'));
+ const payload="<?php\n$literal = '$(touch should-not-exist)';\n";
+ const command="cat > check.php <<'PHP'\n"+payload+"PHP\nprintf 'MaxLabs test passed\\n' > test-output.log\ncat test-output.log";
+ let prompts=0;
+ const workspace=await Workspace.open(root),tools=createTools(workspace),guard=new FlexiblePermissions(new TeamStore(workspace),false,new PermissionGuard('auto',async()=>{prompts++;return 'deny';}));
+ const tool=tools.get('bash')!;
+ assert.equal(await guard.permit(tool,{command}),undefined);
+ const result=await tool.execute({command});assert.equal(result.isError,false,result.text);assert.equal(prompts,0);assert.match(result.text,/MaxLabs test passed/);
+ assert.equal(await readFile(join(root,'check.php'),'utf8'),payload);
+ await assert.rejects(readFile(join(root,'should-not-exist')),{code:'ENOENT'});
+});

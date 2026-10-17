@@ -85,3 +85,29 @@ func TestReportedInspectionCommandRunsWithoutApproval(t *testing.T) {
 		t.Fatal(e, resultText(result))
 	}
 }
+
+func TestLiteralWorkerFilePayloadRunsWithoutApproval(t *testing.T) {
+	root := t.TempDir()
+	payload := "<?php\n$literal = '$(touch should-not-exist)';\n"
+	command := "cat > check.php <<'PHP'\n" + payload + "PHP\nprintf 'MaxLabs test passed\\n' > test-output.log\ncat test-output.log"
+	args, _ := json.Marshal(map[string]string{"command": command})
+	guard := &flexibleGuard{root: root}
+	if reason, err := guard.Permit(context.Background(), "bash", args, false, nil); reason != "" || err != nil {
+		t.Fatal(reason, err)
+	}
+	workspace, err := tools.NewWorkspace(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := tools.NewBashTool(workspace).Execute(context.Background(), args)
+	if err != nil || result.IsError || !strings.Contains(resultText(result), "MaxLabs test passed") {
+		t.Fatal(err, resultText(result))
+	}
+	written, err := os.ReadFile(filepath.Join(root, "check.php"))
+	if err != nil || string(written) != payload {
+		t.Fatal("file payload changed", string(written), err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "should-not-exist")); !os.IsNotExist(err) {
+		t.Fatal("literal heredoc executed shell content", err)
+	}
+}
