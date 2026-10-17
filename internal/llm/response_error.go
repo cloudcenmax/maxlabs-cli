@@ -60,5 +60,12 @@ func (p *HTTPProvider) responseError(operation string, response *http.Response) 
 	if len(runes) > 512 {
 		detail = string(runes[:509]) + "..."
 	}
-	return fmt.Errorf("llm: %s returned %d: %s", operation, response.StatusCode, detail)
+	display := fmt.Sprintf("llm: %s returned %d: %s", operation, response.StatusCode, detail)
+	if response.StatusCode == http.StatusTooManyRequests {
+		if classified, ok := eventError(body).(*ServiceError); ok && classified.Resumable() {
+			classified.Display = display
+			return classified
+		}
+	}
+	return fmt.Errorf("%s", display)
 }

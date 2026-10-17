@@ -29,6 +29,11 @@ export class SessionLog {
   events()                 {
     return structuredClone(this.#events);
   }
+
+  restore(events               )      {
+    if(!Array.isArray(events)||events.some((event,index)=>event.seq!==index+1||!event.message||!Array.isArray(event.message.content)))throw new Error('Invalid saved conversation');
+    this.#events.splice(0,this.#events.length,...structuredClone(events));
+  }
 }
 
 export class SteeringQueue {

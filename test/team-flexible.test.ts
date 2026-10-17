@@ -6,7 +6,17 @@ import test from 'node:test';
 import { TeamStore, teamTool, teamWorkerStepLimit, runApprovedTasks, type TeamChild } from '../src/greenfield.ts';
 import { Workspace, createTools } from '../src/tools.ts';
 import { workerEnvironment, sourceFiles, git } from '../src/team-workspace.ts';
+import { ServiceError } from '../src/transport.ts';
 const report={text:'{"outcome":"completed","summary":"Outcomes verified","blockers":[]}'};
+
+test('quota pauses preserve a worker branch and checks, and resume without new approval or failure attempt',async()=>{
+ const fixture=await seed(),tool=teamTool(fixture.store,async(...args)=>{const result=await fixture.child(...args);const packet=JSON.parse(args[0]);if(packet.task.summary==='Deliver alpha')throw new ServiceError('Quota exhausted',false,'request_limit');return result;},async()=>({text:'unused'}));
+ await assert.rejects(runApprovedTasks(fixture.store,tool),error=>error instanceof ServiceError&&error.code==='request_limit');
+ const paused=await fixture.store.status(),run=paused.runs.alpha;assert.equal(run.status,'paused');assert.ok(run.commit);assert.ok(paused.ready.includes('alpha'));assert.equal(paused.runs.beta.status,'passed');assert.equal(paused.runs.qa,undefined);
+ const root=await fixture.store.path(run.workspace!);await writeFile(join(root,'setup-kept.txt'),'keep setup');
+ const resumed=teamTool(fixture.store,fixture.child,async()=>({text:'unused'}));await runApprovedTasks(fixture.store,resumed);
+ const done=await fixture.store.status();assert.equal(done.runs.alpha.status,'passed');assert.equal(done.runs.alpha.branch,run.branch);assert.equal(done.runs.alpha.workspace,run.workspace);assert.equal(done.runs.alpha.attempts,run.attempts);assert.ok(done.runs.alpha.checks.length>run.checks.length);assert.equal(done.approvals.spec,paused.approvals.spec);assert.equal(await readFile(join(root,'setup-kept.txt'),'utf8'),'keep setup');
+});
 test('Team worker attempts allow 100 model calls and respect explicit smaller budgets',()=>{
  for(const [configured,expected] of [[0,100],[-1,100],[100,100],[101,100],[60,60],[2,2]])assert.equal(teamWorkerStepLimit(configured),expected);
 });

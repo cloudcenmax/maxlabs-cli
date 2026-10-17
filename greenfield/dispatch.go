@@ -1,6 +1,7 @@
 package greenfield
 
 import (
+	"censi/harness/internal/llm"
 	"censi/harness/internal/session"
 	"context"
 	"encoding/json"
@@ -68,6 +69,11 @@ func (r *Runtime) RunApproved(ctx context.Context) (string, int, error) {
 					return "", count, e
 				}
 				recoverable := count < 8
+				for _, id := range ids {
+					if paused := current.Runs[id]; paused != nil && paused.Status == "paused" && paused.StopReason == "quota" {
+						return strings.Join(lines, "\n"), count, &llm.ServiceError{Code: "request_limit", Message: "Quota exhausted. Progress is saved; resume when allowance is available.", Window: paused.QuotaWindow, ResetsAt: paused.QuotaReset, CanRetry: false}
+					}
+				}
 				for _, id := range ids {
 					run := current.Runs[id]
 					if run != nil && run.Status == "passed" {

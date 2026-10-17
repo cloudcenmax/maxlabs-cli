@@ -21,6 +21,7 @@ const reviewFileSuffix = ".review.jsonl"
 // a session event sequence rather than an array index, so it stays stable when
 // the surface is compacted or the client renders only a subset of messages.
 type Review struct {
+	Pause *QuotaPause `json:"pause,omitempty"`
 	// TurnID joins the initial running record to its later final record. It is
 	// also useful when a process exits before an assistant message exists.
 	TurnID       string             `json:"turnId,omitempty"`
@@ -34,6 +35,14 @@ type Review struct {
 	Summary      ReviewSummary      `json:"summary"`
 	Tools        []ReviewTool       `json:"tools,omitempty"`
 	Diffs        []ReviewDiff       `json:"diffs,omitempty"`
+}
+
+type QuotaPause struct {
+	Reason      string `json:"reason,omitempty"`
+	Window      string `json:"window,omitempty"`
+	ResetsAt    string `json:"resetsAt,omitempty"`
+	TeamMode    bool   `json:"teamMode,omitempty"`
+	TeamExecute bool   `json:"teamExecute,omitempty"`
 }
 
 // ReviewVerification records whether the workspace's configured check ran and

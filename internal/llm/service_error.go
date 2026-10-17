@@ -13,10 +13,19 @@ type ServiceError struct {
 	CanRetry bool
 	Window   string
 	ResetsAt string
+	Display  string
 }
 
-func (e *ServiceError) Error() string   { return "MaxLabs: " + e.Message }
+func (e *ServiceError) Error() string {
+	if e.Display != "" {
+		return e.Display
+	}
+	return "MaxLabs: " + e.Message
+}
 func (e *ServiceError) Retryable() bool { return e.CanRetry }
+func (e *ServiceError) Resumable() bool {
+	return e.Code == "request_limit" || e.Code == "temporary_rate_limit"
+}
 
 func eventError(raw []byte) error {
 	var payload map[string]json.RawMessage

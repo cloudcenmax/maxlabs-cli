@@ -223,11 +223,18 @@ func (r *Runtime) runFlexibleWave(ctx context.Context, ids []string) (tools.Resu
 			attempt := 1
 			if previous != nil {
 				attempt += previous.Attempts
+				if previous.Status == "paused" {
+					attempt--
+				}
 			}
 			run := &Run{ID: fmt.Sprintf("%d", timeNow()), Status: "running", Attempts: attempt, Checks: []Check{}}
 			if previous != nil {
 				run.QARepairRounds = previous.QARepairRounds
 				run.RepairFrom = previous.RepairFrom
+				if previous.Status == "paused" {
+					run.Checks = append([]Check{}, previous.Checks...)
+					run.QATestFiles = append([]string{}, previous.QATestFiles...)
+				}
 			}
 			relative := filepath.ToSlash(filepath.Join(filepath.Dir(state.Execution.Path), "workers", id+"-"+run.ID))
 			root, err := r.Store.Path(relative)
@@ -255,7 +262,14 @@ func (r *Runtime) runFlexibleWave(ctx context.Context, ids []string) (tools.Resu
 				base = previous.Commit
 			}
 			resume := previous != nil && previous.StopReason == "step_limit" && previous.Recovery != nil && previous.Recovery.Plan.Action == "continue"
-			if resume {
+			if previous != nil && previous.Status == "paused" && previous.Workspace != "" {
+				relative = previous.Workspace
+				root, err = r.Store.Path(relative)
+				if err != nil {
+					return err
+				}
+				branch = previous.Branch
+			} else if resume {
 				run.RecoveryTrail = append(append([]*Recovery{}, previous.RecoveryTrail...), previous.Recovery)
 				relative = previous.Workspace
 				root, err = r.Store.Path(relative)
@@ -497,11 +511,18 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 	}
 	run.Output = truncate(turn.Text, 48000)
 	run.Status = "failed"
+	var quota *llm.ServiceError
 	after, scanErr := sourceFiles(root)
 	if qa {
 		after, scanErr = recoverySourceFiles(root)
 	}
-	if errors.Is(runErr, agent.ErrStepLimit) {
+	if errors.As(runErr, &quota) && quota.Resumable() {
+		run.Status = "paused"
+		run.StopReason = "quota"
+		run.QuotaWindow = quota.Window
+		run.QuotaReset = quota.ResetsAt
+		run.Output = quota.Error()
+	} else if errors.Is(runErr, agent.ErrStepLimit) {
 		run.StopReason = "step_limit"
 		run.Output = budgetHandoff(run)
 	} else if runErr != nil {
@@ -522,8 +543,13 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 	}
 	if qa && scanErr == nil {
 		valid, added := qaSourceChanges(before, after)
+		if !valid {
+			run.Status = "failed"
+			run.StopReason = "qa_source_changed"
+			run.Output = "Independent QA changed application source or pre-existing tests; review the preserved branch before continuing."
+		}
 		if valid {
-			run.QATestFiles = added
+			run.QATestFiles = append(run.QATestFiles, added...)
 			run.ReviewedSourceHash = recoveryFingerprint(after)
 			if run.Status == "failed" && runErr == nil {
 				for _, c := range run.Checks {

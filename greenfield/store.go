@@ -31,6 +31,8 @@ type Check struct {
 	Output  string `json:"output"`
 }
 type Run struct {
+	QuotaWindow        string         `json:"quota_window,omitempty"`
+	QuotaReset         string         `json:"quota_reset,omitempty"`
 	QATestFiles        []string       `json:"qa_test_files,omitempty"`
 	QARepairRounds     int            `json:"qa_repair_rounds,omitempty"`
 	ReviewedSourceHash string         `json:"reviewed_source_hash,omitempty"`
@@ -707,7 +709,7 @@ func (s *Store) Status(state *State) (Status, error) {
 		}
 		run := state.Runs[id]
 
-		if approved("design") && approved("spec") && depsPassed && !passed(id) && (run == nil || (run.Status != "running" && run.Attempts < 3)) {
+		if approved("design") && approved("spec") && depsPassed && !passed(id) && (run == nil || (run.Status != "running" && (run.Attempts < 3 || run.Status == "paused"))) {
 			out.Ready = append(out.Ready, id)
 		}
 		if !passed(id) {

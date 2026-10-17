@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import process from "node:process";
+import { dirname } from 'node:path';
 import { createInterface,                } from "node:readline";
 import { Agent, addUsage, systemPrompt } from "./agent.js";
 import { defaultAuthStore, OAuthSession,                                         } from "./auth.js";
@@ -7,7 +8,8 @@ import { defaultModel, resolveThinkingLevel } from "./commands.js";
 import {                      PermissionGuard,           } from "./permission.js";
 import { Presentation, renderStartupBrand, StreamingMarkdown } from "./presentation.js";
 import { SessionLog, SteeringQueue } from "./session.js";
-import { GatewayTransport } from "./transport.js";
+import { GatewayTransport, ServiceError } from "./transport.js";
+import { QuotaCheckpointStore, quotaIsAvailable } from './quota-pause.js';
 import { createTools, Workspace } from "./tools.js";
 import { TeamStore, runApprovedTasks, environmentCommands, allowedCheck, createTeamChild, teamInstructions, teamTool } from "./greenfield.js";
 import { TeamDirectionReview, teamDirectionPrompt, TeamExecutionReview, teamExecutionPrompt } from "./team-steering.js";
@@ -139,6 +141,8 @@ async function main()                {
   let teamMode = options.team;
   let teamWorkerModel = options.workerModel;
   const oauth = new OAuthSession(options.authUrl, options.oauthStore);
+  const quotaCheckpoints=new QuotaCheckpointStore(dirname(options.oauthStore),workspace.root);
+  let quotaResuming=false;
   const router = new InputRouter();
   const guard = new PermissionGuard(options.team ? "auto" : options.mode, async (tool, args, decision) => {
     if (teamMode && tool === "webfetch") return "once";
@@ -361,11 +365,13 @@ async function main()                {
   process.on("SIGINT", interrupt);
 
   const startupAccount = await oauth.activeAccount();
+  const savedQuotaPause = await quotaCheckpoints.load(workspace.root,startupAccount?.id||'default').catch(()=>undefined);
   await renderStartupBrand(ui, { model: settings.model, thinking: settings.thinking, auth: accountLabel(startupAccount) });
   process.stdout.write(`${ui.tone(workspace.root)}\n\n`);
   process.stdout.write(`${ui.brand("Commands")}  ${ui.code("/account")} ${ui.code("/model")} ${ui.code("/think")} ${ui.code("/auto")} ${ui.code("/plan")} ${ui.code("/act")} ${ui.code("/team")} ${ui.tone("Greenfield SDE Team · Beta")} ${ui.code("/web")} ${ui.code("/help")} ${ui.code("/exit")}\n`);
   if (teamMode) process.stdout.write(teamStatusText(await teamStore.status()) + "\n\n");
   process.stdout.write(`${ui.tone("Shift+Tab toggles plan mode · type during work to steer the next operation")}\n\n`);
+  if(savedQuotaPause)process.stdout.write(ui.tone('Quota pause saved for this workspace. /resume checks allowance and continues preserved work.\n\n'));
 
   try {
     if (options.prompt) { repaintSubmitted(options.prompt); await runTurn(options.prompt); }
@@ -426,13 +432,14 @@ async function main()                {
       const hit = billed ? Math.round(combined.cacheReadTokens / billed * 100) : 0;
       process.stdout.write(`\n${ui.tone(`[${result.steps} step(s), ${result.toolCalls} tool call(s), cache hit ${hit}%]`)}\n\n`);
       if (teamMode) process.stdout.write(ui.tone(teamNext(await teamStore.status())) + "\n\n");
+      if(quotaResuming){await quotaCheckpoints.clear();quotaResuming=false;}
       router.restoreExternalInput(restoreInput);
     } catch (error) {
       cancelPartialFlush();
       clearStatus();
       const restoreInput = router.beginExternalOutput();
       if (activeAbort.signal.aborted) process.stdout.write(ui.tone("\nTurn stopped.\n\n"));
-      else process.stderr.write(ui.error(`\n${messageOf(error)}\n\n`));
+      else if(!await saveQuotaPause(error,false))process.stderr.write(ui.error(`\n${messageOf(error)}\n\n`));
       router.restoreExternalInput(restoreInput);
     } finally { router.busy = false; activeAbort = undefined; }
   }
@@ -442,15 +449,42 @@ async function main()                {
     let reviewPrompt                 ;
     router.busy = true; activeAbort = new AbortController();
     try { process.stdout.write((await runApprovedTasks(teamStore, workflow, activeAbort.signal, () => { const directions = router.steering.drain(); if (directions.length) { for (const text of directions) agent.log.append("steering", { role: "user", content: [{ type: "text", text }], source: "user" }); throw new TeamDirectionReview(directions); } }, event => { clearStatus(); process.stdout.write(`${event.status === "passed" ? ui.success("✓") : ui.brand("→")} ${event.completed}/${event.total} · ${event.summary}\n`); })) + "\n"); }
-    catch(error) { if(error instanceof TeamDirectionReview)reviewPrompt=teamDirectionPrompt(error.directions);else if(error instanceof TeamExecutionReview)reviewPrompt=teamExecutionPrompt(error.summary);else throw error; }
+    catch(error) { if(error instanceof TeamDirectionReview)reviewPrompt=teamDirectionPrompt(error.directions);else if(error instanceof TeamExecutionReview)reviewPrompt=teamExecutionPrompt(error.summary);else if(!await saveQuotaPause(error,true))throw error; }
     finally { clearStatus(); router.busy = false; activeAbort = undefined; process.stdout.write(teamStatusText(await teamStore.status()) + "\n"); const input=childUsage.uncachedInputTokens+childUsage.cacheReadTokens+childUsage.cacheWriteTokens; if(input)process.stdout.write(ui.tone(`[${input.toLocaleString()} input tokens · ${childUsage.outputTokens.toLocaleString()} output tokens · cache hit ${Math.round(childUsage.cacheReadTokens/input*100)}%]`)+"\n"); }
     if(reviewPrompt)await runTurn(reviewPrompt,true);
+    else if(quotaResuming){const status=await teamStore.status();if(!Object.values(status.runs).some(run=>run.status==='paused')){await quotaCheckpoints.clear();quotaResuming=false;}}
+  }
+
+  async function saveQuotaPause(error        ,teamExecute        )                 {
+    if(!(error instanceof ServiceError)||!error.resumable)return false;
+    await quotaCheckpoints.save({version:1,workspace:workspace.root,accountId:(await oauth.activeAccount())?.id||'default',sessionId:transport.config.sessionId,events:agent.log.events(),settings:{...agent.settings},mode:guard.mode,teamMode,teamExecute,workerModel:teamWorkerModel,window:error.window,resetsAt:error.resetsAt});
+    quotaResuming=true;
+    process.stdout.write(ui.tone(`\nPaused · usage limit. Progress and conversation saved. ${error.resetsAt?'Resets at '+error.resetsAt+'. ':''}Use /resume when allowance is available.\n\n`));
+    return true;
   }
 
   async function command(text        )                   {
     const [name, ...arguments_] = text.trim().split(/\s+/);
     const argument = arguments_[0] || "";
     switch (name) {
+      case '/resume': {
+        try {
+          const saved=await quotaCheckpoints.load(workspace.root,(await oauth.activeAccount())?.id||'default');
+          if(!saved){process.stdout.write('No quota pause is saved for this workspace.\n');return true;}
+          if(guard.mode==='plan'&&saved.mode!=='plan')throw new Error('Switch out of Plan mode before resuming execution. The saved pause is preserved.');
+          const token=await oauth.accessToken();
+          const response=await fetch(token?options.authUrl.replace(/\/$/,'')+'/app/v1/usage/windows':String(options.baseUrl).replace(/\/$/,'')+'/usage/me',{headers:{accept:'application/json',authorization:'Bearer '+(token||options.apiKey||'')}});
+          if(!response.ok)throw new Error('Could not check allowance. The saved pause is preserved.');
+          const usage=await response.json()                                                                                     ;
+          if(!Array.isArray(usage.windows))throw new Error('Allowance response is unavailable. The saved pause is preserved.');
+          if(!quotaIsAvailable(usage.windows)){process.stdout.write('Quota is still exhausted or unavailable. Progress is saved; try /resume after reset or a top-up.\n');return true;}
+          if(!models.some(model=>model.id===saved.settings.model))saved.settings.model=agent.settings.model;
+          if(saved.workerModel&&!models.some(model=>model.id===saved.workerModel))saved.workerModel=saved.settings.model;
+          agent.log.restore(saved.events);Object.assign(agent.settings,saved.settings);transport.config.sessionId=saved.sessionId;guard.mode=saved.mode;teamMode=saved.teamMode;teamWorkerModel=saved.workerModel;quotaResuming=true;workflow.resetBudget();plannerFetches=0;
+          if(saved.teamExecute)await executeApproved();else await runTurn('Resume from the last completed action. Use saved tool results and current files; preserve completed work and finish the outstanding plan.',true);
+        }catch(error){process.stderr.write(ui.error(messageOf(error)+'\n'));}
+        return true;
+      }
       case "/team": {
         try {
           const action = argument || "on";
@@ -567,6 +601,7 @@ function help()       {
   /plan       inspect and plan; refuse mutations
   /act        ask before state-changing operations
   /auto       run audited safe work; still catch destructive drift
+  /resume     continue a saved quota pause when allowance is available
   /team       Greenfield SDE Team (Beta), idea through verified delivery
   /team mode flexible|scoped  choose worker autonomy (reapproval required)
   /team workspace  show the combined build folder and branch

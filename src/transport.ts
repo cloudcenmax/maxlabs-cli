@@ -26,18 +26,20 @@ export class ServiceError extends Error {
   readonly retryable:boolean;
   window?:string;
   resetsAt?:string;
-  constructor(message:string,retryable:boolean){super('MaxLabs: '+message);this.name='ServiceError';this.retryable=retryable;}
+  readonly code:string;
+  get resumable():boolean{return this.code==='request_limit'||this.code==='temporary_rate_limit';}
+  constructor(message:string,retryable:boolean,code='service_unavailable'){super('MaxLabs: '+message);this.name='ServiceError';this.retryable=retryable;this.code=code;}
 }
 function eventError(payload:Record<string,unknown>):ServiceError|undefined {
  if(payload.error===undefined||payload.error===null)return;
  const fields=payload.error as Record<string,unknown>,code=String(fields?.code||'')+' '+String(fields?.type||'');
  if(/quota/i.test(code)){
-  const error=new ServiceError('The request limit has been reached. Check account limits before retrying.',false);
+  const error=new ServiceError('The request limit has been reached. Check account limits before retrying.',false,'request_limit');
   if(['h5','weekly'].includes(String(fields.window))){error.window=String(fields.window);error.message='MaxLabs: The '+(error.window==='h5'?'five-hour':'weekly')+' allowance cannot cover this request.';
    if(typeof fields.resets_at==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(fields.resets_at)&&Number.isFinite(Date.parse(fields.resets_at))){error.resetsAt=new Date(fields.resets_at).toISOString();error.message+=' Resets at '+error.resetsAt+'.';}
   }return error;
  }
- if(/rate_limit|concurrency_limit/i.test(code))return new ServiceError('Request traffic is temporarily limited. Retry after current requests finish or the rate window resets.',true);
+ if(/rate_limit|concurrency_limit/i.test(code))return new ServiceError('Request traffic is temporarily limited. Retry after current requests finish or the rate window resets.',true,'temporary_rate_limit');
  if(/auth|api_key|permission|access_denied/i.test(code))return new ServiceError('The request was not authorized. Check your sign-in and model access.',false);
  if(/context_length|context_window/i.test(code))return new ServiceError('This conversation exceeds the model context limit. Reduce the context before continuing.',false);
  if(/invalid_request|invalid_argument/i.test(code))return new ServiceError('The service could not accept this request. Review the request before retrying.',false);
@@ -99,6 +101,7 @@ export class GatewayTransport {
       },
     });
     if (!response.ok) {
+      if(response.status===429){const payload=await response.clone().json().catch(()=>undefined);const failure=payload&&eventError(payload);if(failure?.resumable){failure.message=await gatewayError(response);throw failure;}}
       throw new Error(await gatewayError(response));
     }
     return response;

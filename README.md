@@ -489,6 +489,15 @@ credential access, external uploads, publishing, global installs, system changes
 and commands whose scope cannot be established still require review. Plan and
 manual approval modes retain their existing behavior.
 
+Quota exhaustion pauses work without discarding completed tool results. Desktop
+history offers Resume; CLI stores a private checkpoint and supports `/resume`,
+including after restart. Resume checks allowance before continuing. Team workers
+retain their branches, setup and checks without spending a failure attempt.
+For personal OAuth sessions, the gateway change admits a final complete response
+while settled allowance remains, then blocks the next request at 100%. That
+response can overshoot the limit. This admission behavior requires deploying the
+gateway change; API-key and organization overage policies retain strict admission.
+
 Workers can use the read-only `team_context` tool to page through the original
 artifacts, run reports, and recorded check output using supplied context keys.
 The approved task and specification remain intact in the handoff.

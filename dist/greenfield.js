@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, readdir, lstat, realpath, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { ServiceError } from "./transport.js";
 import { TeamExecutionReview } from "./team-steering.js";
 import { prepareQARepair } from "./team-qa.js";
 import { recoverBudgetTask, recoveryChild } from "./team-recovery.js";
@@ -274,7 +275,7 @@ export class TeamStore {
       if (!flex && task.role === "foundation" && task.depends_on.length) errors.push("Foundation cannot have dependencies");
       if (task.role === "qa") for (const t of tasks) if ((taskMap.get(t.id)?.role === "implementation" || (flex && taskMap.get(t.id)?.role === "foundation")) && !deps.has(t.id)) errors.push(`${a.id} must follow implementation ${t.id}`);
       for (const r of (flex ? [] : task.requirements)) { if (!requirements.has(r)) errors.push(`Unknown requirement ${r}`); else (task.role === "qa" ? qaCovered : covered).add(r); }
-      if (approved("design") && approved("spec") && !["passed", "running"].includes(s.runs[a.id]?.status) && task.depends_on.every((id        ) => s .runs[id]?.status === "passed") && (s.runs[a.id]?.attempts || 0) < 3) ready.push(a.id);
+      if (approved("design") && approved("spec") && !["passed", "running"].includes(s.runs[a.id]?.status) && task.depends_on.every((id        ) => s .runs[id]?.status === "passed") && ((s.runs[a.id]?.attempts || 0) < 3 || s.runs[a.id]?.status === "paused")) ready.push(a.id);
     }
     for (const r of (flex ? [] : requirements)) if (!covered.has(r)) errors.push(`Uncovered requirement ${r}`);
     for (const r of (flex ? [] : requirements)) if (!qaCovered.has(r)) errors.push(`Requirement missing from independent QA: ${r}`);
@@ -515,6 +516,7 @@ export async function runApprovedTasks(store           , tool                   
     const result = await tool.runBatch(wave, signal); i += wave.length;
     if (result.isError) {
       const current=await store.status();
+      for(const id of wave){const paused=current.runs[id];if(paused?.status==='paused'&&paused.stop_reason==='quota'){const error=new ServiceError('Quota exhausted. Progress is saved; resume when allowance is available.',false,'request_limit');error.window=paused.quota_window;error.resetsAt=paused.quota_reset;throw error;}}
       const recoverable=i<8&&wave.every(id=>{const run=current.runs[id];return run?.status==='passed'||(run?.status==='failed'&&run.stop_reason==='step_limit'&&run.attempts<3);});
       for(const id of wave)if(current.runs[id]?.status==='passed'){lines.push(`Verified and integrated ${id}.`);progress?.({id,summary:id,completed:Object.values(current.runs).filter(r=>r.status==='passed').length,total,status:'passed'});}
       if(recoverable){lines.push('Coordinator is diagnosing the budget stop before continuing preserved work.');continue;}
