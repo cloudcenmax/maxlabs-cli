@@ -356,7 +356,7 @@ export function teamTool(store           , child           , verify             
         }
         if (args.action === "status") {
           const { files, runs, execution, ...status } = await store.status();
-          return { text: JSON.stringify({ ...status, execution: execution ? { path: execution.path, branch: execution.branch, commit: execution.commit, applied_commit: execution.applied_commit } : undefined, artifacts: status.artifacts.map(a => ({ ...a, summary: a.summary.slice(0, 160) })), artifact_root: ".maxlabs/team", runs: Object.fromEntries(Object.entries(runs).map(([id, run]) => [id, { status: run.status, attempts: run.attempts, summary: run.output.slice(0, 600), checks: run.checks.map(({ command, passed, log }) => ({ command, passed, log })) }])) }) };
+          return { text: JSON.stringify({ ...status, execution: execution ? { path: execution.path, branch: execution.branch, commit: execution.commit, applied_commit: execution.applied_commit } : undefined, artifacts: status.artifacts.map(a => ({ ...a, summary: a.summary.slice(0, 160) })), artifact_root: ".maxlabs/team", runs: Object.fromEntries(Object.entries(runs).map(([id, run]) => [id, { status: run.status, attempts: run.attempts, summary: run.output.slice(0, 600), checks: run.checks.map(({ command, passed, final, log }) => ({ command, passed, final, log })) }])) }) };
         }
         if (args.action === "artifact") {
           const state = await store.load(); const artifact = state.artifacts.find(a => a.kind === args.kind && a.id === args.id);
@@ -532,7 +532,7 @@ export async function runApprovedTasks(store           , tool                   
  if (tasks.length && tasks.every(a => s.runs[a.id]?.status === "passed")) {
   if (!s.artifacts.some(a => a.kind === "release")) {
    const spec = s.artifacts.find(a => a.kind === "spec") ;
-   await store.save("release", "verified-delivery", { summary: "All approved implementation and independent QA tasks passed their runner checks.", setup: (await store.content(spec)).deployment || "See project README and recorded verification commands.", verification: tasks.map(a => ({ task: a.id, attempts: s.runs[a.id].attempts, checks: s.runs[a.id].checks.map(({ command, passed }) => ({ command, passed })) })), limitations: ["No deployment or publication performed.", "Browser, visual, accessibility and external integration testing require separately recorded evidence; configured checks alone do not prove them."] });
+   await store.save("release", "verified-delivery", { summary: "All approved implementation and independent QA tasks passed their runner checks.", setup: (await store.content(spec)).deployment || "See project README and recorded verification commands.", verification: tasks.map(a => ({ task: a.id, attempts: s.runs[a.id].attempts, checks: s.runs[a.id].checks.map(({ command, passed, final }) => ({ command, passed, final })) })), limitations: ["No deployment or publication performed.", "Browser, visual, accessibility and external integration testing require separately recorded evidence; configured checks alone do not prove them."] });
   }
   lines.push("All tasks passed. Review the release artifact and inspect the application before accepting delivery.");
  } else if (s.ready.length) lines.push("Batch limit reached. Use /team run for the next batch.");

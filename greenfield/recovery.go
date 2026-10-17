@@ -189,7 +189,7 @@ func (r *Runtime) recoverBudgetTask(ctx context.Context, id string) error {
 		}
 		registry := tools.NewRegistry()
 		shell := tools.NewBashTool(ws).WithEnvironment(workerEnvironment())
-		verify := verificationTool{shell: shell, record: func(command string, result tools.Result) error {
+		verify := verificationTool{shell: shell, record: func(command string, result tools.Result, _ bool) error {
 			check, e := r.Store.recordCheck("recovery-"+recoveryID, 1, len(recovery.Checks)+1, command, resultText(result), !result.IsError)
 			if e == nil {
 				recovery.Checks = append(recovery.Checks, check)

@@ -15,7 +15,7 @@ import { sourceFiles, workerEnvironment, git } from './team-workspace.js';
 
 
 
-async function recoverySourceFiles(root       )                                {
+export async function recoverySourceFiles(root       )                                {
  const files=await sourceFiles(root);for(const path of Object.keys(files))if(path==='.phpunit.result.cache'||path.startsWith('.phpunit.cache/')||files.artisan&&!path.endsWith('/.gitignore')&&(/^(?:storage\/(?:logs|framework\/(?:cache|sessions|views))\/|bootstrap\/cache\/)/.test(path)||path==='database/database.sqlite'||path.startsWith('database/database.sqlite-')))delete files[path];
  return files;
 }

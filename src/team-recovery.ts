@@ -15,7 +15,7 @@ import { sourceFiles, workerEnvironment, git } from './team-workspace.ts';
 export interface RecoveryPlan { action:'continue'|'blocked'; summary:string; next_steps:string[] }
 export interface WorkerAction { tool:string; target:string; output:string; failed:boolean }
 export interface Recovery { plan:RecoveryPlan; source_hash:string; checks:TaskRun['checks']; usage:NonNullable<TaskRun['usage']>; archive:string; changed_files?:string[] }
-async function recoverySourceFiles(root:string):Promise<Record<string,string>> {
+export async function recoverySourceFiles(root:string):Promise<Record<string,string>> {
  const files=await sourceFiles(root);for(const path of Object.keys(files))if(path==='.phpunit.result.cache'||path.startsWith('.phpunit.cache/')||files.artisan&&!path.endsWith('/.gitignore')&&(/^(?:storage\/(?:logs|framework\/(?:cache|sessions|views))\/|bootstrap\/cache\/)/.test(path)||path==='database/database.sqlite'||path.startsWith('database/database.sqlite-')))delete files[path];
  return files;
 }

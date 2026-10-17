@@ -18,7 +18,7 @@ export const environmentCommands = ["php --version", "composer --version", "node
 export const teamInstructions: string = teamPack.instructions.join("\n\n");
 export function teamWorkerStepLimit(configured: number): number { return configured > 0 ? Math.min(configured, teamPack.worker_step_limit) : teamPack.worker_step_limit; }
 export interface Artifact { kind: string; id: string; path: string; hash: string; summary: string; revision: number }
-export interface TaskRun { recovery_trail?: Recovery[]; recovery?: Recovery; recent_actions?: WorkerAction[]; stop_reason?: string; steps_used?: number; step_limit?: number; usage?: { input_tokens: number; cached_input_tokens: number; output_tokens: number; reasoning_tokens: number; calls: number }; duration_ms?: number; branch?: string; workspace?: string; commit?: string; merged?: boolean; id?: string; archive?: string; status: string; attempts: number; output: string; bootstrap?: { command: string; passed: boolean; output: string; log?: string }; checks: Array<{ command: string; passed: boolean; output: string; log?: string }> }
+export interface TaskRun { recovery_trail?: Recovery[]; recovery?: Recovery; recent_actions?: WorkerAction[]; stop_reason?: string; steps_used?: number; step_limit?: number; usage?: { input_tokens: number; cached_input_tokens: number; output_tokens: number; reasoning_tokens: number; calls: number }; duration_ms?: number; branch?: string; workspace?: string; commit?: string; merged?: boolean; id?: string; archive?: string; status: string; attempts: number; output: string; bootstrap?: { command: string; passed: boolean; output: string; log?: string }; checks: Array<{ final?: boolean; command: string; passed: boolean; output: string; log?: string }> }
 export interface TeamState {
   execution_mode: "flexible" | "scoped"; execution?: ExecutionWorkspace;
   schema_version: number; revision: number; artifacts: Artifact[];
@@ -356,7 +356,7 @@ export function teamTool(store: TeamStore, child: TeamChild, verify: (command: s
         }
         if (args.action === "status") {
           const { files, runs, execution, ...status } = await store.status();
-          return { text: JSON.stringify({ ...status, execution: execution ? { path: execution.path, branch: execution.branch, commit: execution.commit, applied_commit: execution.applied_commit } : undefined, artifacts: status.artifacts.map(a => ({ ...a, summary: a.summary.slice(0, 160) })), artifact_root: ".maxlabs/team", runs: Object.fromEntries(Object.entries(runs).map(([id, run]) => [id, { status: run.status, attempts: run.attempts, summary: run.output.slice(0, 600), checks: run.checks.map(({ command, passed, log }) => ({ command, passed, log })) }])) }) };
+          return { text: JSON.stringify({ ...status, execution: execution ? { path: execution.path, branch: execution.branch, commit: execution.commit, applied_commit: execution.applied_commit } : undefined, artifacts: status.artifacts.map(a => ({ ...a, summary: a.summary.slice(0, 160) })), artifact_root: ".maxlabs/team", runs: Object.fromEntries(Object.entries(runs).map(([id, run]) => [id, { status: run.status, attempts: run.attempts, summary: run.output.slice(0, 600), checks: run.checks.map(({ command, passed, final, log }) => ({ command, passed, final, log })) }])) }) };
         }
         if (args.action === "artifact") {
           const state = await store.load(); const artifact = state.artifacts.find(a => a.kind === args.kind && a.id === args.id);
@@ -532,7 +532,7 @@ export async function runApprovedTasks(store: TeamStore, tool: ReturnType<typeof
  if (tasks.length && tasks.every(a => s.runs[a.id]?.status === "passed")) {
   if (!s.artifacts.some(a => a.kind === "release")) {
    const spec = s.artifacts.find(a => a.kind === "spec")!;
-   await store.save("release", "verified-delivery", { summary: "All approved implementation and independent QA tasks passed their runner checks.", setup: (await store.content(spec)).deployment || "See project README and recorded verification commands.", verification: tasks.map(a => ({ task: a.id, attempts: s.runs[a.id].attempts, checks: s.runs[a.id].checks.map(({ command, passed }) => ({ command, passed })) })), limitations: ["No deployment or publication performed.", "Browser, visual, accessibility and external integration testing require separately recorded evidence; configured checks alone do not prove them."] });
+   await store.save("release", "verified-delivery", { summary: "All approved implementation and independent QA tasks passed their runner checks.", setup: (await store.content(spec)).deployment || "See project README and recorded verification commands.", verification: tasks.map(a => ({ task: a.id, attempts: s.runs[a.id].attempts, checks: s.runs[a.id].checks.map(({ command, passed, final }) => ({ command, passed, final })) })), limitations: ["No deployment or publication performed.", "Browser, visual, accessibility and external integration testing require separately recorded evidence; configured checks alone do not prove them."] });
   }
   lines.push("All tasks passed. Review the release artifact and inspect the application before accepting delivery.");
  } else if (s.ready.length) lines.push("Batch limit reached. Use /team run for the next batch.");

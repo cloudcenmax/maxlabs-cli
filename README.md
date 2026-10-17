@@ -481,8 +481,11 @@ then stops with a reviewable handoff; it cannot retry indefinitely. Diagnoses an
 their token usage are saved separately from worker acceptance evidence.
 
 Source snapshots exclude local secrets and dependency trees. Workers record real
-verification through `verify`; a completion report alone cannot pass. QA runs its
-own checks, and source changes during QA block delivery. Release acceptance checks
+verification through `verify`; a completion report alone cannot pass.
+After repairing failures, mark the comprehensive acceptance run `final: true`
+on `verify`. Its recorded success supersedes earlier failed attempts while their
+logs remain available to QA. Later failures still block completion.
+QA runs its own checks, and source changes during QA block delivery. Release acceptance checks
 for unreviewed build changes and conflicting edits in the original project before
 applying source. Dependency installation and local environment setup may be needed
 in the combined build and destination; follow the release instructions. Git

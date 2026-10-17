@@ -24,6 +24,7 @@ type Artifact struct {
 	Revision int    `json:"revision"`
 }
 type Check struct {
+	Final   bool   `json:"final,omitempty"`
 	Log     string `json:"log,omitempty"`
 	Command string `json:"command"`
 	Passed  bool   `json:"passed"`

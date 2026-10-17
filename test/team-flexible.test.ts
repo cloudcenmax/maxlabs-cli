@@ -26,7 +26,7 @@ async function seed(conflict=false) {
   try{await new Promise(r=>setTimeout(r,35));
    const command=task!.role==='qa'?'node --test acceptance.test.mjs':`node --check ${conflict?'shared':id}.mjs`;
    if(task!.role!=='qa')await writeFile(join(packet.workspace,`${conflict?'shared':id}.mjs`),`export const value = '${id}';\n`);
-   else {assert.match(await readFile(join(packet.workspace,'alpha.mjs'),'utf8'),/alpha/);assert.match(await readFile(join(packet.workspace,'beta.mjs'),'utf8'),/beta/);}
+   else {await writeFile(join(packet.workspace,'.phpunit.result.cache'),'generated during QA');assert.match(await readFile(join(packet.workspace,'alpha.mjs'),'utf8'),/alpha/);assert.match(await readFile(join(packet.workspace,'beta.mjs'),'utf8'),/beta/);}
    const result=await tools.get('bash')!.execute({command});await task!._recordVerification(command,result);return report;
   }finally{active--;}
  };
@@ -117,5 +117,18 @@ test('automatic recovery stops at three attempts and rejects source edits or bli
   const {store}=await seed(),model=recoveryTransport(mode==='bounded',mode==='mutate',mode==='blind');
   const child=createTeamChild(store,model.transport,new PermissionGuard('auto',async()=> 'deny'),{model:'worker',maxSteps:2,maxTokens:1024,thinking:'minimal',webSearch:'off',webSearchUses:0});
   await assert.rejects(runApprovedTasks(store,teamTool(store,child,async()=>({text:'unused'}))),mode==='bounded'?/Automatic recovery stopped at its approved budget.*Preserved branch:/:/Coordinator needs attention/);const s=await store.status();assert.equal(s.runs.alpha.attempts,mode==='bounded'?3:1);assert.equal(s.runs.qa,undefined);if(mode==='bounded')assert.equal(model.recoveryCalls,4);else assert.equal(s.runs.alpha.recovery?.plan.action,'blocked');if(mode==='mutate'){assert.deepEqual(s.runs.alpha.recovery?.changed_files,['partial.txt']);assert.match(s.runs.alpha.recovery!.plan.summary,/partial.txt/);}
+ }
+});
+
+test('explicit final verification supersedes repaired failures without erasing evidence or later regressions',async()=>{
+ const {createTeamChild}=await import('../src/greenfield.ts');const {PermissionGuard}=await import('../src/permission.ts');
+ for(const mode of ['final','ordinary','later-failure']){
+  const {store}=await seed();let calls=0;
+  const call=(id:string,command:string,final=false)=>({type:'tool_call',callId:id,name:'verify',arguments:JSON.stringify({command,final})});
+  const transport:any={async complete(){calls++;return {message:{role:'assistant',content:calls===1?[call('broken',"printf 'Missing import fixture' >&2; false"),call('repaired','node --check acceptance.test.mjs',mode!=='ordinary'),...(mode==='later-failure'?[call('regression','false')]:[])]:[{type:'text',text:report.text}]},usage:{uncachedInputTokens:10,cacheReadTokens:0,cacheWriteTokens:0,outputTokens:5,reasoningTokens:0,webSearches:0}};}};
+  const child=createTeamChild(store,transport,new PermissionGuard('auto',async()=> 'deny'),{model:'worker',maxSteps:3,maxTokens:1024,thinking:'minimal',webSearch:'off',webSearchUses:0});
+  const result=await teamTool(store,child,async()=>({text:'unused'})).runBatch(['alpha']),run=(await store.status()).runs.alpha;
+  assert.equal(result.isError,mode!=='final');assert.equal(run.status,mode==='final'?'passed':'failed');assert.equal(run.checks[0].passed,false);assert.equal(run.checks[1].passed,true);assert.equal(run.checks[1].final,mode!=='ordinary');
+  if(mode!=='final'){assert.equal(run.stop_reason,'verification_failed');assert.match(run.output,/Completion was not accepted/);}
  }
 });

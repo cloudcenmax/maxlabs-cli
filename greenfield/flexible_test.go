@@ -62,6 +62,7 @@ type flexibleProvider struct {
 	mu                          sync.Mutex
 	active, peak                int
 	conflict, missing, mutateQA bool
+	cacheQA                     bool
 }
 
 func (p *flexibleProvider) Complete(_ context.Context, req wire.Request) (llm.Response, error) {
@@ -83,6 +84,9 @@ func (p *flexibleProvider) Complete(_ context.Context, req wire.Request) (llm.Re
 	}
 	task, _ := packet["task"].(map[string]any)
 	id := text(task, "summary")
+	if id == "qa" && p.cacheQA {
+		_ = os.WriteFile(filepath.Join(text(packet, "workspace"), ".phpunit.result.cache"), []byte("generated during QA"), 0600)
+	}
 	p.mu.Lock()
 	p.active++
 	if p.active > p.peak {
@@ -109,7 +113,7 @@ func (p *flexibleProvider) Complete(_ context.Context, req wire.Request) (llm.Re
 func TestFlexibleParallelBranchesQAAndApply(t *testing.T) {
 	s := flexibleSeed(t)
 	r := runtime(t, s, false)
-	p := &flexibleProvider{}
+	p := &flexibleProvider{cacheQA: true}
 	r.Provider = p
 	_, count, e := r.RunApproved(context.Background())
 	if e != nil {
@@ -517,5 +521,47 @@ func TestRecoveryFingerprintMatchesCLIAndIgnoresLaravelRuntimeData(t *testing.T)
 	changed, _ := sourceHash(root)
 	if changed == after {
 		t.Fatal("application source edits were ignored")
+	}
+}
+
+type repairedVerificationProvider struct{ final, failAfter bool }
+
+func (p repairedVerificationProvider) Complete(ctx context.Context, req wire.Request) (llm.Response, error) {
+	for _, m := range req.Messages {
+		for _, b := range m.Content {
+			if b.Type == session.BlockToolResult {
+				return completedProvider{}.Complete(ctx, req)
+			}
+		}
+	}
+	args, _ := json.Marshal(map[string]any{"command": "node --check acceptance.test.mjs", "final": p.final})
+	calls := []session.Block{session.ToolCall("broken", "verify", json.RawMessage(`{"command":"printf 'Missing import fixture' >&2; false"}`)), session.ToolCall("repaired", "verify", args)}
+	if p.failAfter {
+		calls = append(calls, session.ToolCall("regression", "verify", json.RawMessage(`{"command":"false"}`)))
+	}
+	return llm.Response{Message: session.Message{Role: session.RoleAssistant, Content: calls}}, nil
+}
+func TestFinalVerificationSupersedesRepairedAttemptsButNotLaterFailures(t *testing.T) {
+	for _, mode := range []string{"final", "ordinary", "later-failure"} {
+		t.Run(mode, func(t *testing.T) {
+			s := flexibleSeed(t)
+			r := runtime(t, s, false)
+			r.Provider = repairedVerificationProvider{final: mode != "ordinary", failAfter: mode == "later-failure"}
+			result, err := r.runFlexibleWave(context.Background(), []string{"alpha"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, _ := s.Status(nil)
+			run := status.Runs["alpha"]
+			if (run.Status == "passed") != (mode == "final") || result.IsError != (mode != "final") {
+				t.Fatal(run.Status, run.Output)
+			}
+			if len(run.Checks) < 2 || run.Checks[0].Passed || !run.Checks[1].Passed || run.Checks[1].Final != (mode != "ordinary") {
+				t.Fatal("verification history lost", run.Checks)
+			}
+			if mode != "final" && (!strings.Contains(run.Output, "Completion was not accepted") || run.StopReason != "verification_failed") {
+				t.Fatal("failure reason missing", run.Output)
+			}
+		})
 	}
 }

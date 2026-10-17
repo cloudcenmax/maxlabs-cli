@@ -80,11 +80,11 @@ func (g *flexibleGuard) Permit(ctx context.Context, name string, args json.RawMe
 
 type verificationTool struct {
 	shell  tools.Tool
-	record func(string, tools.Result) error
+	record func(string, tools.Result, bool) error
 }
 
 func (t verificationTool) Definition() tools.Definition {
-	return tools.Definition{Name: "verify", Description: "Run a real acceptance, test, build, or lint command. The runner records the command, exit status, and output for independent QA. Choose commands appropriate to the actual project; do not substitute echo, version probes, skipped tests, or mocks for acceptance.", Parameters: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"},"timeout_ms":{"type":"integer"}},"required":["command"],"additionalProperties":false}`)}
+	return tools.Definition{Name: "verify", Description: "Run a real acceptance, test, build, or lint command. Set final:true only for comprehensive verification of this task after all repairs; a passing final run supersedes earlier failed attempts without deleting their logs. The runner records actual exit status for independent QA. Echo, version probes, skipped tests, and installation are not acceptance.", Parameters: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"},"timeout_ms":{"type":"integer"},"final":{"type":"boolean"}},"required":["command"],"additionalProperties":false}`)}
 }
 func (t verificationTool) Execute(ctx context.Context, args json.RawMessage) (tools.Result, error) {
 	var input map[string]any
@@ -99,7 +99,8 @@ func (t verificationTool) Execute(ctx context.Context, args json.RawMessage) (to
 	if err != nil {
 		return result, err
 	}
-	if err = t.record(text(input, "command"), result); err != nil {
+	final, _ := input["final"].(bool)
+	if err = t.record(text(input, "command"), result, final); err != nil {
 		return tools.Result{}, err
 	}
 	return result, nil
@@ -312,11 +313,11 @@ func (r *Runtime) runFlexibleWave(ctx context.Context, ids []string) (tools.Resu
 			}
 			if run.Status == "passed" {
 				if text(done.job.task, "role") == "qa" {
-					verified, err := sourceFiles(done.job.root)
+					verified, err := recoverySourceFiles(done.job.root)
 					if err != nil {
 						return err
 					}
-					combined, err := sourceFiles(integration)
+					combined, err := recoverySourceFiles(integration)
 					if err != nil {
 						return err
 					}
@@ -324,7 +325,10 @@ func (r *Runtime) runFlexibleWave(ctx context.Context, ids []string) (tools.Resu
 						run.Status = "failed"
 						run.Output = "Integration changed during QA; verify the combined result again."
 					} else {
-						state.Execution.VerifiedFiles = verified
+						state.Execution.VerifiedFiles, err = sourceFiles(integration)
+						if err != nil {
+							return err
+						}
 					}
 				} else {
 					if _, err = gitCommand(ctx, integration, "merge", "--no-edit", "--no-ff", run.Branch); err != nil {
@@ -367,6 +371,9 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 	}
 	qa := text(task, "role") == "qa"
 	before, err := sourceFiles(root)
+	if qa {
+		before, err = recoverySourceFiles(root)
+	}
 	if err != nil {
 		return run, err
 	}
@@ -376,9 +383,10 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 	if !qa {
 		available = append(available, tools.NewWriteTool(ws), tools.NewEditTool(ws))
 	}
-	verify := verificationTool{shell: shell, record: func(command string, result tools.Result) error {
+	verify := verificationTool{shell: shell, record: func(command string, result tools.Result, final bool) error {
 		check, err := r.Store.recordCheck(id+"-"+run.ID, attempt, len(run.Checks)+1, command, resultText(result), !result.IsError)
 		if err == nil {
+			check.Final = final
 			run.Checks = append(run.Checks, check)
 		}
 		return err
@@ -432,7 +440,7 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 			r.progressMu.Unlock()
 		}
 	})
-	instruction := "Deliver the supplied outcomes in this isolated Git working branch. Inspect the actual repository and project instructions. You choose files, implementation, dependency installation, and shell commands; listed read/write/check paths are suggestions, not a file allowlist. Use the approved stack and decisions; when prose conflicts, the approved specification wins. Scaffold using official tools in staging if an existing partial project prevents an in-place generator; preserve useful existing work. You may investigate and repair test failures within this task. Do not publish, deploy, change workflow metadata, or access other projects. Use verify for real outcome checks; its output is recorded by the runner. Keep test logs/reports in the system temporary directory or .cache so they do not alter delivery source. If the project uses .env, initialize it with cp -n .env.example .env rather than overwriting existing configuration; never print its contents. Finish ONLY with JSON {\"outcome\":\"completed\" or \"blocked\",\"summary\":\"...\",\"blockers\":[]}. A completed report without recorded passing verification is blocked."
+	instruction := "Deliver the supplied outcomes in this isolated Git working branch. Inspect the actual repository and project instructions. You choose files, implementation, dependency installation, and shell commands; listed read/write/check paths are suggestions, not a file allowlist. Use the approved stack and decisions; when prose conflicts, the approved specification wins. Scaffold using official tools in staging if an existing partial project prevents an in-place generator; preserve useful existing work. You may investigate and repair test failures within this task. After repairs, use verify with final:true for comprehensive task acceptance; chain required commands with && so any failure is reported. Do not publish, deploy, change workflow metadata, or access other projects. Use verify for real outcome checks; its output is recorded by the runner. Keep test logs/reports in the system temporary directory or .cache so they do not alter delivery source. If the project uses .env, initialize it with cp -n .env.example .env rather than overwriting existing configuration; never print its contents. Finish ONLY with JSON {\"outcome\":\"completed\" or \"blocked\",\"summary\":\"...\",\"blockers\":[]}. A completed report without recorded passing verification is blocked."
 	if qa {
 		instruction = "Independently verify the supplied outcomes. Inspect the actual diff and source, look for regressions, missing behavior, weakened tests, and contradictory evidence. Run your own checks with verify; do not merely trust implementation reports. Do not edit application source. Finish ONLY with JSON {\"outcome\":\"completed\" or \"blocked\",\"summary\":\"...\",\"blockers\":[]}. Report concrete gaps, not assumed success.\n" + instruction
 	}
@@ -453,6 +461,9 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 	run.Output = truncate(turn.Text, 48000)
 	run.Status = "failed"
 	after, scanErr := sourceFiles(root)
+	if qa {
+		after, scanErr = recoverySourceFiles(root)
+	}
 	if errors.Is(runErr, agent.ErrStepLimit) {
 		run.StopReason = "step_limit"
 		run.Output = budgetHandoff(run)
@@ -464,6 +475,9 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 		run.Output = "Independent QA changed application source; review these changes before retrying."
 	} else if CompletedReport(turn.Text) && verifiedChecks(run.Checks) {
 		run.Status = "passed"
+	} else if CompletedReport(turn.Text) {
+		run.StopReason = "verification_failed"
+		run.Output = "Completion was not accepted: verification is missing or earlier failures remain unresolved. After repairs, run comprehensive verify with final:true. All check logs are preserved.\nWorker report: " + run.Output
 	}
 	if ctx.Err() != nil {
 		run.Status = "interrupted"
@@ -484,8 +498,14 @@ func verifiedChecks(checks []Check) bool {
 	if len(checks) == 0 {
 		return false
 	}
+	start := 0
+	for i, check := range checks {
+		if check.Final && check.Passed {
+			start = i
+		}
+	}
 	latest := map[string]bool{}
-	for _, check := range checks {
+	for _, check := range checks[start:] {
 		latest[check.Command] = check.Passed
 	}
 	for _, passed := range latest {
