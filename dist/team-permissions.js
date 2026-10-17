@@ -70,7 +70,9 @@ function literalHeredocs(command        )                     {
     const delimiterQuote=command[j++], start=j;
     while(j<command.length && /[a-zA-Z0-9_]/.test(command[j])) j++;
     if(j===start || command[j]!==delimiterQuote) return;
-    const delimiter=command.slice(start,j++), lineEnd=command.indexOf('\n',j);
+    const delimiter=command.slice(start,j++);
+    if(j<command.length && !' \t\n|&;>'.includes(command[j])) return;
+    const lineEnd=command.indexOf('\n',j);
     if(lineEnd<0 || command.slice(j,lineEnd).includes('<')) return;
     let bodyEnd=lineEnd+1, found=false;
     while(bodyEnd<=command.length) {

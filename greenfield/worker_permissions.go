@@ -185,6 +185,9 @@ func workerLiteralHeredocs(command string) (string, bool) {
 		}
 		delimiter := command[start:j]
 		j++
+		if j < len(command) && !strings.ContainsRune(" \t\n|&;>", rune(command[j])) {
+			return "", false
+		}
 		lineEnd := strings.IndexByte(command[j:], '\n')
 		if lineEnd < 0 {
 			return "", false

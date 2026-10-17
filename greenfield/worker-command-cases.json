@@ -322,5 +322,13 @@
   {
     "command": "pushd escape; npm test > test-output.log",
     "auto": false
+  },
+  {
+    "command": "cat > check.php <<'EOF'foo\nEOFfoo\nrm -rf src\nEOF",
+    "auto": false
+  },
+  {
+    "command": "cat > check.php <<'E''OF'\nEOF\nrm -rf src\nE",
+    "auto": false
   }
 ]
