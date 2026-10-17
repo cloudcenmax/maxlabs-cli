@@ -338,5 +338,37 @@
   {
     "command": "eval 'rm -rf src' > test-output.log",
     "auto": false
+  },
+  {
+    "command": "cd {root} && php artisan tinker --execute='\n$u = App\\Models\\User::create([\"name\"=>\"X\"]);\n' 2>&1 | tail -2; php artisan test > {root}/check.log 2>&1; python3 - <<'EOF'\nlog=open('{root}/check.log').read()\ni=log.find('Expected:')\nprint(log[max(0,i-200):i+400])\nEOF",
+    "auto": true
+  },
+  {
+    "command": "python3 - <<'EOF'\nlog=open('{root}/check.log').read()\nprint(log[-400:])\nEOF",
+    "auto": true
+  },
+  {
+    "command": "python3 - <<'EOF'\nlog=open('{root}/check.log').read()\ni=log.find('Expected:')\nprint(log[max(0,i-200):i+400])\nimport os\nos.remove('app.php')\nEOF",
+    "auto": false
+  },
+  {
+    "command": "python3 - <<'EOF'\nlog=open('{root}/.env').read()\nprint(log[-400:])\nEOF",
+    "auto": false
+  },
+  {
+    "command": "python3 - <<'EOF'\nlog=open('{root}/check.log','w').read()\nprint(log[-400:])\nEOF",
+    "auto": false
+  },
+  {
+    "command": "python3 - <<'EOF'\nlog=open('{root}/check.log').read()\ni=log.find('Expected:')\nprint(log[max(0,i-200):i+400])\nEOF\nrm -rf src",
+    "auto": false
+  },
+  {
+    "command": "python3 - <<EOF\nlog=open('{root}/check.log').read()\ni=log.find('Expected:')\nprint(log[max(0,i-200):i+400])\nEOF",
+    "auto": false
+  },
+  {
+    "command": "python3 - <<'EOF'\nlog=open('{root}/link-to-secret.log').read()\nprint(log[-400:])\nEOF",
+    "auto": false
   }
 ]

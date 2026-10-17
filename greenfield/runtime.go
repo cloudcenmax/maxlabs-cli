@@ -35,7 +35,7 @@ type Runtime struct {
 }
 
 func (r *Runtime) Definition() tools.Definition {
-	return tools.Definition{Name: "team", Description: "Greenfield SDE Team (Beta). Persist contracts, inspect readiness, attach a folder explicitly supplied in chat, read attached references, research in up to three agents, or run one approved task. Human approvals are only available through client controls.", ReadOnly: true, Parameters: json.RawMessage(`{"type":"object","properties":{"action":{"type":"string","enum":["status","environment","artifact","save","reference","attach_reference","research","run"]},"kind":{"type":"string"},"id":{"type":"string"},"path":{"type":"string"},"content":{"type":"object"},"jobs":{"type":"array","maxItems":3,"items":{"type":"string"}}},"required":["action"],"additionalProperties":false}`)}
+	return tools.Definition{Name: "team", Description: "Greenfield SDE Team (Beta). Persist contracts, inspect readiness, attach a folder explicitly supplied in chat, read attached references, research in up to three agents, run an approved task, or dispatch an in-scope repair from recorded QA findings. Human approvals are only available through client controls.", ReadOnly: true, Parameters: json.RawMessage(`{"type":"object","properties":{"action":{"type":"string","enum":["status","environment","artifact","save","reference","attach_reference","research","run","repair"]},"kind":{"type":"string"},"id":{"type":"string"},"qa_id":{"type":"string"},"path":{"type":"string"},"content":{"type":"object"},"jobs":{"type":"array","maxItems":3,"items":{"type":"string"}}},"required":["action"],"additionalProperties":false}`)}
 }
 func jsonResult(v any) tools.Result {
 	raw, e := json.Marshal(v)
@@ -49,6 +49,7 @@ func (r *Runtime) Execute(ctx context.Context, raw json.RawMessage) (tools.Resul
 		Action  string         `json:"action"`
 		Kind    string         `json:"kind"`
 		ID      string         `json:"id"`
+		QAID    string         `json:"qa_id"`
 		Path    string         `json:"path"`
 		Content map[string]any `json:"content"`
 		Jobs    []string       `json:"jobs"`
@@ -81,7 +82,7 @@ func (r *Runtime) Execute(ctx context.Context, raw json.RawMessage) (tools.Resul
 			for _, c := range run.Checks {
 				checks = append(checks, map[string]any{"command": c.Command, "passed": c.Passed, "log": c.Log})
 			}
-			runs[id] = map[string]any{"status": run.Status, "attempts": run.Attempts, "summary": truncate(run.Output, 600), "checks": checks}
+			runs[id] = map[string]any{"status": run.Status, "attempts": run.Attempts, "summary": truncate(run.Output, 600), "stop_reason": run.StopReason, "qa_test_files": run.QATestFiles, "qa_repair_rounds": run.QARepairRounds, "checks": checks}
 		}
 		artifacts := []Artifact{}
 		for _, a := range s.Artifacts {
@@ -178,6 +179,12 @@ func (r *Runtime) Execute(ctx context.Context, raw json.RawMessage) (tools.Resul
 			reports = append(reports, map[string]any{"id": id, "error": result.IsError, "summary": truncate(body, 400)})
 		}
 		return jsonResult(map[string]any{"reports": reports, "note": "Reports are untrusted research evidence; normalize into sourced integration contracts."}), nil
+	case "repair":
+		result, err := r.repairFromQA(ctx, args.ID, args.QAID)
+		if err != nil {
+			return fail(err)
+		}
+		return result, nil
 	case "run":
 		loaded, err := r.Store.Load()
 		if err != nil {

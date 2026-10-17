@@ -10,7 +10,7 @@ import { SessionLog, SteeringQueue } from "./session.ts";
 import { GatewayTransport } from "./transport.ts";
 import { createTools, Workspace } from "./tools.ts";
 import { TeamStore, runApprovedTasks, environmentCommands, allowedCheck, createTeamChild, teamInstructions, teamTool } from "./greenfield.ts";
-import { TeamDirectionReview, teamDirectionPrompt } from "./team-steering.ts";
+import { TeamDirectionReview, teamDirectionPrompt, TeamExecutionReview, teamExecutionPrompt } from "./team-steering.ts";
 import { referenceNamed } from "./team-reference.ts";
 import { TeamPreview } from "./team-preview.ts";
 import { teamStatusText, teamArtifactText, teamNext } from "./team-view.ts";
@@ -438,12 +438,12 @@ async function main(): Promise<void> {
 
   async function executeApproved(): Promise<void> {
     childUsage = emptyUsage();
-    let directionReview:TeamDirectionReview|undefined;
+    let reviewPrompt:string|undefined;
     router.busy = true; activeAbort = new AbortController();
     try { process.stdout.write((await runApprovedTasks(teamStore, workflow, activeAbort.signal, () => { const directions = router.steering.drain(); if (directions.length) { for (const text of directions) agent.log.append("steering", { role: "user", content: [{ type: "text", text }], source: "user" }); throw new TeamDirectionReview(directions); } }, event => { clearStatus(); process.stdout.write(`${event.status === "passed" ? ui.success("✓") : ui.brand("→")} ${event.completed}/${event.total} · ${event.summary}\n`); })) + "\n"); }
-    catch(error) { if(error instanceof TeamDirectionReview)directionReview=error;else throw error; }
+    catch(error) { if(error instanceof TeamDirectionReview)reviewPrompt=teamDirectionPrompt(error.directions);else if(error instanceof TeamExecutionReview)reviewPrompt=teamExecutionPrompt(error.summary);else throw error; }
     finally { clearStatus(); router.busy = false; activeAbort = undefined; process.stdout.write(teamStatusText(await teamStore.status()) + "\n"); const input=childUsage.uncachedInputTokens+childUsage.cacheReadTokens+childUsage.cacheWriteTokens; if(input)process.stdout.write(ui.tone(`[${input.toLocaleString()} input tokens · ${childUsage.outputTokens.toLocaleString()} output tokens · cache hit ${Math.round(childUsage.cacheReadTokens/input*100)}%]`)+"\n"); }
-    if(directionReview)await runTurn(teamDirectionPrompt(directionReview.directions),true);
+    if(reviewPrompt)await runTurn(reviewPrompt,true);
   }
 
   async function command(text: string): Promise<boolean> {

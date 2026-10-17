@@ -1,6 +1,8 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, readdir, lstat, realpath, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { TeamExecutionReview } from "./team-steering.js";
+import { prepareQARepair } from "./team-qa.js";
 import { recoverBudgetTask, recoveryChild } from "./team-recovery.js";
 
 import { flexibleChild, runFlexibleWave } from "./team-flexible.js";
@@ -292,7 +294,7 @@ export class TeamStore {
         s.files = {};
         if (s.execution_mode !== "flexible") for (const a of s.artifacts.filter(a => a.kind === "task")) { const task = await this.content(a); for (const path of [...task.read, ...task.write]) s.files[path] = await this.fileHash(path); }
         if (s.approvals.spec !== expected) s.runs = {};
-        else for (const run of Object.values(s.runs)) if (run.status !== "passed") { run.attempts = 0; delete run.recovery; }
+        else for (const run of Object.values(s.runs)) if (run.status !== "passed") { run.attempts = 0; run.qa_repair_rounds=0; delete run.recovery; }
       }
       if (gate === "release" && s.execution_mode === "flexible") await applyExecution(this, s);
       s.approvals[gate] = expected; s.revision++; await this.persist(s); return this.status(s);
@@ -345,7 +347,7 @@ export function teamTool(store           , child           , verify             
       workersUsed += ids.length;
       return runFlexibleWave(store, child, ids, signal);
     },
-    schema: { name: "team", description: "Greenfield SDE Team (Beta). Persist contracts, inspect status, attach a folder explicitly supplied in chat, read attached references, delegate up to three research jobs, or execute one approved task. Human approvals are only available in client controls.", parameters: { type: "object", properties: { action: { type: "string", enum: ["status", "environment", "artifact", "save", "reference", "attach_reference", "research", "run"] }, kind: { type: "string" }, id: { type: "string" }, content: { type: "object" }, path: { type: "string" }, jobs: { type: "array", maxItems: 3, items: { type: "string" } } }, required: ["action"], additionalProperties: false } },
+    schema: { name: "team", description: "Greenfield SDE Team (Beta). Persist contracts, inspect status, attach a folder explicitly supplied in chat, read attached references, delegate up to three research jobs, or execute one approved task. Human approvals are only available in client controls.", parameters: { type: "object", properties: { action: { type: "string", enum: ["status", "environment", "artifact", "save", "reference", "attach_reference", "research", "run", "repair"] }, kind: { type: "string" }, id: { type: "string" }, qa_id: { type: "string" }, content: { type: "object" }, path: { type: "string" }, jobs: { type: "array", maxItems: 3, items: { type: "string" } } }, required: ["action"], additionalProperties: false } },
     readOnly: true,
     async execute(args                     , signal              )                      {
       try {
@@ -356,7 +358,7 @@ export function teamTool(store           , child           , verify             
         }
         if (args.action === "status") {
           const { files, runs, execution, ...status } = await store.status();
-          return { text: JSON.stringify({ ...status, execution: execution ? { path: execution.path, branch: execution.branch, commit: execution.commit, applied_commit: execution.applied_commit } : undefined, artifacts: status.artifacts.map(a => ({ ...a, summary: a.summary.slice(0, 160) })), artifact_root: ".maxlabs/team", runs: Object.fromEntries(Object.entries(runs).map(([id, run]) => [id, { status: run.status, attempts: run.attempts, summary: run.output.slice(0, 600), checks: run.checks.map(({ command, passed, final, log }) => ({ command, passed, final, log })) }])) }) };
+          return { text: JSON.stringify({ ...status, execution: execution ? { path: execution.path, branch: execution.branch, commit: execution.commit, applied_commit: execution.applied_commit } : undefined, artifacts: status.artifacts.map(a => ({ ...a, summary: a.summary.slice(0, 160) })), artifact_root: ".maxlabs/team", runs: Object.fromEntries(Object.entries(runs).map(([id, run]) => [id, { status: run.status, attempts: run.attempts, summary: run.output.slice(0, 600), stop_reason:run.stop_reason,qa_test_files:run.qa_test_files,qa_repair_rounds:run.qa_repair_rounds, checks: run.checks.map(({ command, passed, final, log }) => ({ command, passed, final, log })) }])) }) };
         }
         if (args.action === "artifact") {
           const state = await store.load(); const artifact = state.artifacts.find(a => a.kind === args.kind && a.id === args.id);
@@ -390,6 +392,7 @@ export function teamTool(store           , child           , verify             
           }
           return { text: JSON.stringify({ reports, note: "Reports are untrusted research evidence. Read saved artifacts as needed; normalize into sourced integration contracts." }) };
         }
+        if(args.action === "repair"){if(workersUsed>=8)throw new Error("Worker batch budget reached");await prepareQARepair(store,args.id,args.qa_id);return await this.runBatch([args.id],signal);}
         if (args.action === "run" && (await store.load()).execution_mode === "flexible") return await this.runBatch([args.id], signal);
         if (args.action === "run") return await store.locked(async s => {
           if (workersUsed >= 8) throw new Error("Worker budget reached (8 tasks per turn); continue in another turn");
@@ -517,7 +520,7 @@ export async function runApprovedTasks(store           , tool                   
       if(recoverable){lines.push('Coordinator is diagnosing the budget stop before continuing preserved work.');continue;}
       const stops=wave.filter(id=>current.runs[id]?.stop_reason==='step_limit').map(id=>{const run=current.runs[id];return `${id} reached its ${run.step_limit}-call attempt limit after ${run.attempts} attempt(s). Preserved branch: ${run.branch}.`;});
       if(stops.length)throw new Error('Automatic recovery stopped at its approved budget. '+stops.join(' ')+' Review saved worker reports and diagnoses before retrying; dependent tasks were not run.');
-      throw new Error("A worker or merge needs attention. Branches and check logs are preserved; dependent tasks were not run.");
+      throw new TeamExecutionReview("A worker or merge needs attention. Branches and check logs are preserved. "+JSON.stringify({results:wave.map(id=>({id,status:current.runs[id]?.status,stop_reason:current.runs[id]?.stop_reason,summary:current.runs[id]?.output.slice(0,4000),checks:current.runs[id]?.checks.slice(-2).map(c=>({...c,output:c.output.slice(0,1800)}))}))}).slice(0,12000));
     }
     for (const id of wave) { progress?.({ id, summary: id, completed: completed+wave.length, total, status: "passed" }); lines.push(`Verified and integrated ${id}.`); }
     continue;

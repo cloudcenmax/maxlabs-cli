@@ -23,10 +23,11 @@ import (
 var outsideCommand = regexp.MustCompile(`(?i)(\.\.[/\\]|~[/\\]|/(?:Users|home|etc|root|private|tmp|var|Applications|Volumes)(?:[/\s]|$)|\b(?:curl|wget|ssh|scp|sftp|rsync|security|sudo)\b|\.maxlabs|\.git[/\\]|\b(?:npm|pnpm|yarn|bun)\s+publish\b)`)
 
 type flexibleGuard struct {
-	root    string
-	qa      bool
-	base    agent.Guard
-	fetches int
+	root     string
+	qa       bool
+	qaBefore map[string]string
+	base     agent.Guard
+	fetches  int
 }
 
 func (g *flexibleGuard) Permit(ctx context.Context, name string, args json.RawMessage, readOnly bool, t audit.Transcript) (string, error) {
@@ -38,8 +39,8 @@ func (g *flexibleGuard) Permit(ctx context.Context, name string, args json.RawMe
 		return "workers cannot control workflow state or delegate", nil
 	}
 	if name == "write" || name == "edit" {
-		if g.qa {
-			return "independent QA cannot edit application source", nil
+		if g.qa && !qaWritable(g.root, text(input, "path"), g.qaBefore) {
+			return "Independent QA may add or refine new regression tests, but cannot change application source or pre-existing tests", nil
 		}
 		if _, err := SafeWorkerPath(g.root, text(input, "path")); err != nil {
 			return err.Error(), nil
@@ -88,19 +89,27 @@ func (t verificationTool) Definition() tools.Definition {
 }
 func (t verificationTool) Execute(ctx context.Context, args json.RawMessage) (tools.Result, error) {
 	var input map[string]any
-	_ = json.Unmarshal(args, &input)
+	if err := json.Unmarshal(args, &input); err != nil || input == nil || strings.TrimSpace(text(input, "command")) == "" {
+		return tools.Error("Verification requires a command."), nil
+	}
+	originalCommand := text(input, "command")
 	var result tools.Result
 	var err error
 	if goruntime.GOOS == "windows" && strings.Contains(text(input, "command"), "|") {
 		result = tools.Error("MaxLabs verification requires an unpiped command on Windows so a failed test cannot be hidden by an output filter.")
 	} else {
-		result, err = t.shell.Execute(ctx, args)
+		execution := input
+		if goruntime.GOOS != "windows" {
+			execution["command"] = "set -e\n" + text(input, "command")
+		}
+		shellArgs, _ := json.Marshal(execution)
+		result, err = t.shell.Execute(ctx, shellArgs)
 	}
 	if err != nil {
 		return result, err
 	}
 	final, _ := input["final"].(bool)
-	if err = t.record(text(input, "command"), result, final); err != nil {
+	if err = t.record(originalCommand, result, final); err != nil {
 		return tools.Result{}, err
 	}
 	return result, nil
@@ -219,6 +228,10 @@ func (r *Runtime) runFlexibleWave(ctx context.Context, ids []string) (tools.Resu
 				attempt += previous.Attempts
 			}
 			run := &Run{ID: fmt.Sprintf("%d", timeNow()), Status: "running", Attempts: attempt, Checks: []Check{}}
+			if previous != nil {
+				run.QARepairRounds = previous.QARepairRounds
+				run.RepairFrom = previous.RepairFrom
+			}
 			relative := filepath.ToSlash(filepath.Join(filepath.Dir(state.Execution.Path), "workers", id+"-"+run.ID))
 			root, err := r.Store.Path(relative)
 			if err != nil {
@@ -275,6 +288,9 @@ func (r *Runtime) runFlexibleWave(ctx context.Context, ids []string) (tools.Resu
 				prior["summary"] = truncate(previous.Output, 1600)
 				prior["recent_actions"] = previous.RecentActions
 				packet["previous_attempt"] = prior
+				if previous.RepairFrom != "" {
+					packet["qa_repair"] = map[string]any{"qa_id": previous.RepairFrom, "instruction": "Repair in-scope QA defects. Preserve failing regression tests and run comprehensive final verification; do not weaken tests or change approved requirements."}
+				}
 				if resume {
 					packet["recovery_plan"] = previous.Recovery.Plan
 				}
@@ -336,13 +352,24 @@ func (r *Runtime) runFlexibleWave(ctx context.Context, ids []string) (tools.Resu
 					if err != nil {
 						return err
 					}
-					if !sameFiles(verified, combined) {
+					valid, _ := qaSourceChanges(combined, verified)
+					if !valid {
 						run.Status = "failed"
 						run.Output = "Integration changed during QA; verify the combined result again."
 					} else {
-						state.Execution.VerifiedFiles, err = sourceFiles(integration)
-						if err != nil {
-							return err
+						if len(run.QATestFiles) > 0 {
+							if _, err = gitCommand(ctx, integration, "merge", "--no-edit", "--no-ff", run.Branch); err != nil {
+								run.Status = "failed"
+								run.Output = "QA test merge needs review: " + err.Error()
+							} else {
+								state.Execution.Commit, _ = gitCommand(ctx, integration, "rev-parse", "HEAD")
+							}
+						}
+						if run.Status == "passed" {
+							state.Execution.VerifiedFiles, err = sourceFiles(integration)
+							if err != nil {
+								return err
+							}
 						}
 					}
 				} else {
@@ -395,9 +422,7 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 	registry := tools.NewRegistry()
 	shell := tools.NewBashTool(ws).WithEnvironment(workerEnvironment())
 	available := []tools.Tool{tools.NewReadTool(ws), tools.NewGlobTool(ws), tools.NewGrepTool(ws), shell, tools.NewWebFetchTool()}
-	if !qa {
-		available = append(available, tools.NewWriteTool(ws), tools.NewEditTool(ws))
-	}
+	available = append(available, tools.NewWriteTool(ws), tools.NewEditTool(ws))
 	verify := verificationTool{shell: shell, record: func(command string, result tools.Result, final bool) error {
 		check, err := r.Store.recordCheck(id+"-"+run.ID, attempt, len(run.Checks)+1, command, resultText(result), !result.IsError)
 		if err == nil {
@@ -423,7 +448,7 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 		assembly.Model = r.WorkerModel
 	}
 	limit := workerStepLimit(r.MaxSteps)
-	guard := &flexibleGuard{root: root, qa: qa, base: runtimeGuard{r}}
+	guard := &flexibleGuard{root: root, qa: qa, qaBefore: before, base: runtimeGuard{r}}
 	run.StepLimit = limit
 	workerLog := session.New(nil)
 	worker, err := agent.New(agent.Config{Assembly: assembly, Provider: r.Provider, Tools: registry, Guard: guard, MaxSteps: limit, MaxRetries: 2, MaxToolResultBytes: 16000, OnStep: func(step int) {
@@ -457,7 +482,7 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 	})
 	instruction := "Deliver the supplied outcomes in this isolated Git working branch. Inspect the actual repository and project instructions. You choose files, implementation, dependency installation, and shell commands; listed read/write/check paths are suggestions, not a file allowlist. Use the approved stack and decisions; when prose conflicts, the approved specification wins. Scaffold using official tools in staging if an existing partial project prevents an in-place generator; preserve useful existing work. You may investigate and repair test failures within this task. After repairs, use verify with final:true for comprehensive task acceptance; chain required commands with && so any failure is reported. Do not publish, deploy, change workflow metadata, or access other projects. Use verify for real outcome checks; its output is recorded by the runner. Keep test logs/reports in the system temporary directory or .cache so they do not alter delivery source. If the project uses .env, initialize it with cp -n .env.example .env rather than overwriting existing configuration; never print its contents. Finish ONLY with JSON {\"outcome\":\"completed\" or \"blocked\",\"summary\":\"...\",\"blockers\":[]}. A completed report without recorded passing verification is blocked."
 	if qa {
-		instruction = "Independently verify the supplied outcomes. Use team_context with context_index keys for detailed prior reports and checks. The change summary is a bounded navigation aid, not verification evidence. Inspect the actual diff and source, look for regressions, missing behavior, weakened tests, and contradictory evidence. Run your own checks with verify; do not merely trust implementation reports. Do not edit application source. Finish ONLY with JSON {\"outcome\":\"completed\" or \"blocked\",\"summary\":\"...\",\"blockers\":[]}. Report concrete gaps, not assumed success.\n" + instruction
+		instruction = "Independently verify the supplied outcomes. Use team_context with context_index keys for detailed prior reports and checks. The change summary is a bounded navigation aid, not verification evidence. Inspect the actual diff and source, look for regressions, missing behavior, weakened tests, and contradictory evidence. Run your own checks with verify; do not merely trust implementation reports. You may add new regression tests, but must not change application source or pre-existing tests. Report observed defects with failing verify evidence so the orchestrator can dispatch repair. Finish ONLY with JSON {\"outcome\":\"completed\" or \"blocked\",\"summary\":\"...\",\"blockers\":[]}. Report concrete gaps, not assumed success.\n" + instruction
 	}
 	instruction += fmt.Sprintf(" Your budget is %d model steps; reserve the final steps for verification and a handoff. Fresh worktrees omit installed dependencies; install from the project manifests before testing. Verification output is already bounded: prefer unpiped checks, avoid head (which may interrupt the test), and rerun any failed check after repairs.", limit)
 	turn, runErr := worker.Run(ctx, instruction+"\n\n"+string(encoded))
@@ -486,8 +511,9 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 		run.Output = runErr.Error()
 	} else if scanErr != nil {
 		run.Output = scanErr.Error()
-	} else if qa && !sameFiles(before, after) {
-		run.Output = "Independent QA changed application source; review these changes before retrying."
+	} else if valid, _ := qaSourceChanges(before, after); qa && !valid {
+		run.StopReason = "qa_source_changed"
+		run.Output = "Independent QA changed application source or pre-existing tests; review the preserved branch before continuing."
 	} else if CompletedReport(turn.Text) && verifiedChecks(run.Checks) {
 		run.Status = "passed"
 	} else if CompletedReport(turn.Text) {
@@ -497,7 +523,22 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 	if ctx.Err() != nil {
 		run.Status = "interrupted"
 	}
-	if !qa && scanErr == nil {
+	if qa && scanErr == nil {
+		valid, added := qaSourceChanges(before, after)
+		if valid {
+			run.QATestFiles = added
+			run.ReviewedSourceHash = recoveryFingerprint(after)
+			if run.Status == "failed" && runErr == nil {
+				for _, c := range run.Checks {
+					if !c.Passed {
+						run.StopReason = "qa_findings"
+						break
+					}
+				}
+			}
+		}
+	}
+	if scanErr == nil && (!qa || run.StopReason != "qa_source_changed") {
 		if run.Commit, err = checkpoint(ctx, root, &ExecutionWorkspace{}, "Team task "+id+": "+run.Status); err != nil {
 			run.Status = "failed"
 			run.Output += "\n" + err.Error()

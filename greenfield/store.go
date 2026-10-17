@@ -31,25 +31,29 @@ type Check struct {
 	Output  string `json:"output"`
 }
 type Run struct {
-	RecoveryTrail []*Recovery    `json:"recovery_trail,omitempty"`
-	Recovery      *Recovery      `json:"recovery,omitempty"`
-	RecentActions []WorkerAction `json:"recent_actions,omitempty"`
-	StopReason    string         `json:"stop_reason,omitempty"`
-	StepsUsed     int            `json:"steps_used,omitempty"`
-	StepLimit     int            `json:"step_limit,omitempty"`
-	Usage         *RunUsage      `json:"usage,omitempty"`
-	DurationMS    int64          `json:"duration_ms,omitempty"`
-	Branch        string         `json:"branch,omitempty"`
-	Workspace     string         `json:"workspace,omitempty"`
-	Commit        string         `json:"commit,omitempty"`
-	Merged        bool           `json:"merged,omitempty"`
-	ID            string         `json:"id,omitempty"`
-	Archive       string         `json:"archive,omitempty"`
-	Status        string         `json:"status"`
-	Attempts      int            `json:"attempts"`
-	Output        string         `json:"output"`
-	Checks        []Check        `json:"checks"`
-	Bootstrap     *Check         `json:"bootstrap,omitempty"`
+	QATestFiles        []string       `json:"qa_test_files,omitempty"`
+	QARepairRounds     int            `json:"qa_repair_rounds,omitempty"`
+	ReviewedSourceHash string         `json:"reviewed_source_hash,omitempty"`
+	RepairFrom         string         `json:"repair_from,omitempty"`
+	RecoveryTrail      []*Recovery    `json:"recovery_trail,omitempty"`
+	Recovery           *Recovery      `json:"recovery,omitempty"`
+	RecentActions      []WorkerAction `json:"recent_actions,omitempty"`
+	StopReason         string         `json:"stop_reason,omitempty"`
+	StepsUsed          int            `json:"steps_used,omitempty"`
+	StepLimit          int            `json:"step_limit,omitempty"`
+	Usage              *RunUsage      `json:"usage,omitempty"`
+	DurationMS         int64          `json:"duration_ms,omitempty"`
+	Branch             string         `json:"branch,omitempty"`
+	Workspace          string         `json:"workspace,omitempty"`
+	Commit             string         `json:"commit,omitempty"`
+	Merged             bool           `json:"merged,omitempty"`
+	ID                 string         `json:"id,omitempty"`
+	Archive            string         `json:"archive,omitempty"`
+	Status             string         `json:"status"`
+	Attempts           int            `json:"attempts"`
+	Output             string         `json:"output"`
+	Checks             []Check        `json:"checks"`
+	Bootstrap          *Check         `json:"bootstrap,omitempty"`
 }
 type State struct {
 	Files         map[string]string   `json:"files"`
@@ -832,6 +836,7 @@ func (s *Store) Approve(gate, expected string) (Status, error) {
 				for _, run := range state.Runs {
 					if run.Status != "passed" {
 						run.Attempts = 0
+						run.QARepairRounds = 0
 						run.Recovery = nil
 					}
 				}

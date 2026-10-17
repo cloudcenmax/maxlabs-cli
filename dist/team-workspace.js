@@ -7,7 +7,7 @@ import { safeTaskPath,                                } from './greenfield.js';
 
 const hash=(raw           )       =>createHash('sha256').update(raw).digest('hex');
 const omitted=new Set(['.git','.maxlabs','node_modules','vendor','.venv','venv','__pycache__','.next','.nuxt','.cache','.pytest_cache','.DS_Store','.aws','.ssh','.npmrc','.netrc','.pypirc','auth.json']);
-export function workerEnvironment()                   {return Object.fromEntries(Object.entries(process.env).filter(([key])=>!/(TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY|PRIVATE_KEY|^HARNESS_|^MAXLABS_|^OPENAI_|^ANTHROPIC_|^SSH_AUTH_SOCK$)/i.test(key)));}
+export function workerEnvironment()                   {return Object.fromEntries(Object.entries(process.env).filter(([key])=>!/(TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY|PRIVATE_KEY|^HARNESS_|^MAXLABS_|^OPENAI_|^ANTHROPIC_|^SSH_AUTH_SOCK$|^NODE_TEST_CONTEXT$)/i.test(key)));}
 export async function sourceFiles(root       )                                {
  const files                      ={};let bytes=0;
  const walk=async(directory       ,prefix='')              =>{for(const entry of await readdir(directory,{withFileTypes:true})){

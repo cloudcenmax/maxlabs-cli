@@ -491,7 +491,7 @@ verification through `verify`; a completion report alone cannot pass.
 After repairing failures, mark the comprehensive acceptance run `final: true`
 on `verify`. Its recorded success supersedes earlier failed attempts while their
 logs remain available to QA. Later failures still block completion.
-QA runs its own checks, and source changes during QA block delivery. Release acceptance checks
+QA runs its own checks and may add regression tests. It cannot change application source or pre-existing tests. Recorded QA failures return to the orchestrator, which can dispatch `team repair` against an existing approved implementation task and then rerun independent QA. Up to three repair rounds and eight worker starts per batch prevent infinite loops. This does not change the approved spec or auto-approve scope changes. Release acceptance checks
 for unreviewed build changes and conflicting edits in the original project before
 applying source. Dependency installation and local environment setup may be needed
 in the combined build and destination; follow the release instructions. Git

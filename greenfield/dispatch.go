@@ -91,7 +91,7 @@ func (r *Runtime) RunApproved(ctx context.Context) (string, int, error) {
 				if len(stops) > 0 {
 					return strings.Join(lines, "\n"), count, fmt.Errorf("automatic recovery stopped at its approved budget. %s Review saved worker reports and diagnoses before retrying; dependent tasks were not run", strings.Join(stops, " "))
 				}
-				return strings.Join(lines, "\n"), count, fmt.Errorf("parallel wave needs attention; branches and evidence preserved. %s", resultText(result))
+				return strings.Join(lines, "\n"), count, &ExecutionReview{Summary: "A worker wave needs coordinator review. " + truncate(resultText(result), 12000)}
 			}
 			for _, id := range ids {
 				lines = append(lines, "Verified and integrated "+id+".")

@@ -21,7 +21,7 @@ async function seed(conflict=false) {
  assert.deepEqual((await store.status()).errors,[]);let s=await store.status();await store.approve('design',s.gates.design);s=await store.status();await store.approve('spec',s.gates.spec);
  let active=0,peak=0;const seen:string[]=[];
  const child:TeamChild=async(raw,role,task)=>{
-  const packet=JSON.parse(raw),id=packet.task.summary.split(' ').at(-1),tools=createTools(await Workspace.open(packet.workspace));
+  const packet=JSON.parse(raw),id=packet.task.summary.split(' ').at(-1),tools=createTools(await Workspace.open(packet.workspace),{environment:workerEnvironment()});
   active++;peak=Math.max(peak,active);seen.push(packet.branch);
   try{await new Promise(r=>setTimeout(r,35));
    const command=task!.role==='qa'?'node --test acceptance.test.mjs':`node --check ${conflict?'shared':id}.mjs`;
@@ -73,9 +73,9 @@ test('retry recovers uncommitted files left by a stopped older worker',async()=>
  const resumed=await teamTool(store,child,async()=>({text:'unused'})).runBatch(['alpha']);assert.equal(resumed.isError,false,resumed.text);const s=await store.status();assert.match(await readFile(join(await store.path(s.execution!.path),'recovered.mjs'),'utf8'),/recovered/);await assert.rejects(readFile(join(root,'recovered.mjs')),{code:'ENOENT'});
 });
 
-test('failing piped verification cannot merge a worker branch',async()=>{
+test('failing verification sequence cannot merge a worker branch',async()=>{
  const {store}=await seed();const {createTeamChild}=await import('../src/greenfield.ts');const {PermissionGuard}=await import('../src/permission.ts');let calls=0;
- const transport:any={async complete(){calls++;return {message:{role:'assistant',content:calls===1?[{type:'tool_call',callId:'verify',name:'verify',arguments:JSON.stringify({command:'false 2>&1 | tail -20'})}]:[{type:'text',text:report.text}]},usage:{uncachedInputTokens:10,cacheReadTokens:90,cacheWriteTokens:0,outputTokens:5,reasoningTokens:0,webSearches:0}};}};
+ const transport:any={async complete(){calls++;return {message:{role:'assistant',content:calls===1?[{type:'tool_call',callId:'verify',name:'verify',arguments:JSON.stringify({command:'false; true'})}]:[{type:'text',text:report.text}]},usage:{uncachedInputTokens:10,cacheReadTokens:90,cacheWriteTokens:0,outputTokens:5,reasoningTokens:0,webSearches:0}};}};
  const child=createTeamChild(store,transport,new PermissionGuard('auto',async()=> 'deny'),{model:'worker',maxSteps:3,maxTokens:1024,thinking:'minimal',webSearch:'off',webSearchUses:0});
  const result=await teamTool(store,child,async()=>({text:'unused'})).runBatch(['alpha']);assert.equal(result.isError,true);const run=(await store.status()).runs.alpha;assert.equal(run.status,'failed');assert.equal(run.merged,undefined);assert.equal(run.checks[0].passed,false);
 });
@@ -131,4 +131,19 @@ test('explicit final verification supersedes repaired failures without erasing e
   assert.equal(result.isError,mode!=='final');assert.equal(run.status,mode==='final'?'passed':'failed');assert.equal(run.checks[0].passed,false);assert.equal(run.checks[1].passed,true);assert.equal(run.checks[1].final,mode!=='ordinary');
   if(mode!=='final'){assert.equal(run.stop_reason,'verification_failed');assert.match(run.output,/Completion was not accepted/);}
  }
+});
+
+test('QA findings hand off to an in-scope repair worker and fresh independent QA',async()=>{
+ const {store}=await seed();const {createTeamChild}=await import('../src/greenfield.ts');const {PermissionGuard}=await import('../src/permission.ts');const {TeamExecutionReview}=await import('../src/team-steering.ts');
+ const call=(name:string,args:any)=>({type:'tool_call',callId:name,name,arguments:JSON.stringify(args)});
+ const transport:any={async complete(req:any){let packet:any={},hasResult=false;for(const m of req.messages)for(const b of m.content){if(b.type==='tool_result')hasResult=true;const i=b.text?.lastIndexOf('\n\n{')??-1;if(i>=0)try{packet=JSON.parse(b.text.slice(i+2));}catch{}}
+ const qa=packet.task.role==='qa',id=packet.task.summary.split(' ').at(-1);let content:any[]=[];
+ if(hasResult)content=[{type:'text',text:qa&&!packet.previous_attempt?'{"outcome":"blocked","summary":"QA reproduced alpha regression","blockers":["alpha is wrong"]}':report.text}];
+ else if(qa){if(!packet.previous_attempt)content.push(call('write',{path:'tests/qa.test.mjs',content:"import assert from 'node:assert/strict';import {value} from '../alpha.mjs';assert.equal(value,'alpha');"}));content.push(call('verify',{command:'node --test acceptance.test.mjs tests/qa.test.mjs',final:true}));}
+ else content=[call('write',{path:id+'.mjs',content:`export const value='${id==='alpha'&&!packet.qa_repair?'wrong':id}';`}),call('verify',{command:packet.qa_repair?'node --test acceptance.test.mjs tests/qa.test.mjs':'node --check '+id+'.mjs',final:true})];
+ return {message:{role:'assistant',content},usage:{uncachedInputTokens:10,cacheReadTokens:0,cacheWriteTokens:0,outputTokens:5,reasoningTokens:0,webSearches:0}};}};
+ const child=createTeamChild(store,transport,new PermissionGuard('auto',async()=> 'deny'),{model:'worker',maxSteps:5,maxTokens:1024,thinking:'minimal',webSearch:'off',webSearchUses:0}),tool=teamTool(store,child,async()=>({text:'unused'}));
+ await assert.rejects(runApprovedTasks(store,tool),TeamExecutionReview);let s=await store.load();const oldQA=s.runs.qa.workspace,approval=s.approvals.spec;assert.equal(s.runs.qa.stop_reason,'qa_findings',JSON.stringify(s.runs.qa));assert.equal(s.runs.qa.qa_test_files?.length,1);assert.ok(s.runs.qa.commit);
+ const repair=await tool.execute({action:'repair',id:'alpha',qa_id:'qa'});assert.ok(!repair.isError,repair.text);const qa=await tool.execute({action:'run',id:'qa'});assert.ok(!qa.isError,qa.text);s=await store.load();assert.equal(s.runs.qa.status,'passed');assert.notEqual(s.runs.qa.workspace,oldQA);assert.equal(s.runs.qa.qa_repair_rounds,1);assert.equal(s.approvals.spec,approval);
+ assert.equal((await tool.execute({action:'repair',id:'alpha',qa_id:'qa'})).isError,true);
 });

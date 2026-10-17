@@ -119,7 +119,7 @@ func workerShellWord(raw string) string {
 // Only cat with a quoted delimiter may supply literal here-document data.
 // Its body is a file payload, not shell instructions. All commands before and
 // after it still pass the usual assessment; execution keeps the original text.
-func workerLiteralHeredocs(command string) (string, bool) {
+func workerLiteralHeredocs(root, command string) (string, bool) {
 	masked := []byte(command)
 	var quote byte
 	for i := 0; i < len(command); i++ {
@@ -150,21 +150,28 @@ func workerLiteralHeredocs(command string) (string, bool) {
 		if !strings.HasPrefix(command[i:], "<<") {
 			return "", false
 		}
-		lineStart := strings.LastIndex(command[:i], "\n") + 1
-		parts, ok := workerShellParts(command[lineStart:i])
+		lineStart := 0
+		parts, ok := workerShellParts(string(masked[:i]))
 		if !ok {
 			return "", false
 		}
 		name := ""
+		commandStart := 0
+		words := []string{}
 		for _, part := range parts {
 			raw := command[lineStart+part[0] : lineStart+part[1]]
 			if raw == ";" || raw == "&&" || raw == "||" || raw == "|" {
 				name = ""
-			} else if name == "" {
-				name = workerShellWord(raw)
+				words = nil
+			} else {
+				if name == "" {
+					name = workerShellWord(raw)
+					commandStart = lineStart + part[0]
+				}
+				words = append(words, workerShellWord(raw))
 			}
 		}
-		if name != "cat" {
+		if name != "cat" && name != "python" && name != "python3" {
 			return "", false
 		}
 		j := i + 2
@@ -198,6 +205,7 @@ func workerLiteralHeredocs(command string) (string, bool) {
 		}
 		bodyEnd := lineEnd + 1
 		found := false
+		contentEnd := 0
 		for bodyEnd <= len(command) {
 			end := strings.IndexByte(command[bodyEnd:], '\n')
 			if end < 0 {
@@ -206,6 +214,7 @@ func workerLiteralHeredocs(command string) (string, bool) {
 				end += bodyEnd
 			}
 			if command[bodyEnd:end] == delimiter {
+				contentEnd = bodyEnd
 				bodyEnd = end
 				found = true
 				break
@@ -217,6 +226,17 @@ func workerLiteralHeredocs(command string) (string, bool) {
 		}
 		if !found {
 			return "", false
+		}
+		if name != "cat" {
+			if len(words) != 2 || words[1] != "-" || !workerReadOnlyLogBody(root, command[lineEnd+1:contentEnd]) {
+				return "", false
+			}
+			for k := commandStart; k < bodyEnd; k++ {
+				masked[k] = ' '
+			}
+			copy(masked[commandStart:], []byte("true"))
+			i = bodyEnd - 1
+			continue
 		}
 		for k := i; k < j; k++ {
 			masked[k] = ' '
@@ -286,7 +306,7 @@ func workerAutoCommand(root, command string) (string, bool) {
 	}
 	root = canonical
 	var ok bool
-	command, ok = workerLiteralHeredocs(command)
+	command, ok = workerLiteralHeredocs(root, command)
 	if !ok {
 		return "", false
 	}

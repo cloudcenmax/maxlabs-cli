@@ -7,7 +7,7 @@ import { safeTaskPath, type TeamStore, type TeamState } from './greenfield.ts';
 export interface ExecutionWorkspace {path:string;branch:string;base_commit:string;base_files:Record<string,string>;commit?:string;applied_commit?:string;verified_files?:Record<string,string>}
 const hash=(raw:Uint8Array):string=>createHash('sha256').update(raw).digest('hex');
 const omitted=new Set(['.git','.maxlabs','node_modules','vendor','.venv','venv','__pycache__','.next','.nuxt','.cache','.pytest_cache','.DS_Store','.aws','.ssh','.npmrc','.netrc','.pypirc','auth.json']);
-export function workerEnvironment():NodeJS.ProcessEnv {return Object.fromEntries(Object.entries(process.env).filter(([key])=>!/(TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY|PRIVATE_KEY|^HARNESS_|^MAXLABS_|^OPENAI_|^ANTHROPIC_|^SSH_AUTH_SOCK$)/i.test(key)));}
+export function workerEnvironment():NodeJS.ProcessEnv {return Object.fromEntries(Object.entries(process.env).filter(([key])=>!/(TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY|PRIVATE_KEY|^HARNESS_|^MAXLABS_|^OPENAI_|^ANTHROPIC_|^SSH_AUTH_SOCK$|^NODE_TEST_CONTEXT$)/i.test(key)));}
 export async function sourceFiles(root:string):Promise<Record<string,string>> {
  const files:Record<string,string>={};let bytes=0;
  const walk=async(directory:string,prefix=''):Promise<void>=>{for(const entry of await readdir(directory,{withFileTypes:true})){

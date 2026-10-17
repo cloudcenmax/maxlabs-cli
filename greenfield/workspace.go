@@ -74,7 +74,7 @@ func workerEnvironment() []string {
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
 		upper := strings.ToUpper(key)
-		if strings.Contains(upper, "TOKEN") || strings.Contains(upper, "SECRET") || strings.Contains(upper, "PASSWORD") || strings.Contains(upper, "API_KEY") || strings.Contains(upper, "ACCESS_KEY") || strings.Contains(upper, "PRIVATE_KEY") || strings.HasPrefix(upper, "HARNESS_") || strings.HasPrefix(upper, "MAXLABS_") || strings.HasPrefix(upper, "OPENAI_") || strings.HasPrefix(upper, "ANTHROPIC_") || upper == "SSH_AUTH_SOCK" {
+		if strings.Contains(upper, "TOKEN") || strings.Contains(upper, "SECRET") || strings.Contains(upper, "PASSWORD") || strings.Contains(upper, "API_KEY") || strings.Contains(upper, "ACCESS_KEY") || strings.Contains(upper, "PRIVATE_KEY") || strings.HasPrefix(upper, "HARNESS_") || strings.HasPrefix(upper, "MAXLABS_") || strings.HasPrefix(upper, "OPENAI_") || strings.HasPrefix(upper, "ANTHROPIC_") || upper == "SSH_AUTH_SOCK" || upper == "NODE_TEST_CONTEXT" {
 			continue
 		}
 		result = append(result, entry)

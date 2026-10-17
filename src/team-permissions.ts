@@ -50,7 +50,7 @@ function word(raw: string): string {
 }
 // Literal cat heredocs are file payloads. Keep all surrounding commands in the
 // assessment, and reject expandable or executable-shell heredocs.
-function literalHeredocs(command: string): string | undefined {
+async function literalHeredocs(root:string,command: string): Promise<string | undefined> {
   const masked=command.split(''); let quote='';
   for(let i=0;i<command.length;i++) {
     const c=command[i];
@@ -60,11 +60,11 @@ function literalHeredocs(command: string): string | undefined {
     if(c==="'"||c==='"') { quote=c; continue; }
     if(c!=='<') continue;
     if(!command.startsWith('<<',i)) return;
-    const lineStart=command.lastIndexOf('\n',i-1)+1, parts=shellParts(command.slice(lineStart,i));
+    const lineStart=0, parts=shellParts(masked.slice(0,i).join(''));
     if(!parts) return;
-    let name='';
-    for(const part of parts) { if([';','&&','||','|'].includes(part[0])) name=''; else if(!name) name=word(part[0]); }
-    if(name!=='cat') return;
+    let name='',commandStart=0,words:string[]=[];
+    for(const part of parts){if([';','&&','||','|'].includes(part[0])){name='';words=[];}else{if(!name){name=word(part[0]);commandStart=lineStart+part.index;}words.push(word(part[0]));}}
+    if(!['cat','python','python3'].includes(name))return;
     let j=i+2; while(j<command.length && ' \t'.includes(command[j])) j++;
     if(!["'",'"'].includes(command[j])) return;
     const delimiterQuote=command[j++], start=j;
@@ -74,18 +74,30 @@ function literalHeredocs(command: string): string | undefined {
     if(j<command.length && !' \t\n|&;>'.includes(command[j])) return;
     const lineEnd=command.indexOf('\n',j);
     if(lineEnd<0 || command.slice(j,lineEnd).includes('<')) return;
-    let bodyEnd=lineEnd+1, found=false;
+    let bodyEnd=lineEnd+1, found=false,contentEnd=0;
     while(bodyEnd<=command.length) {
       let end=command.indexOf('\n',bodyEnd); if(end<0) end=command.length;
-      if(command.slice(bodyEnd,end)===delimiter) { bodyEnd=end; found=true; break; }
+      if(command.slice(bodyEnd,end)===delimiter) {contentEnd=bodyEnd; bodyEnd=end; found=true; break; }
       if(end===command.length) break; bodyEnd=end+1;
     }
     if(!found) return;
+    if(name!=='cat'){if(words.length!==2||words[1]!=='-'||!await readOnlyLogBody(root,command.slice(lineEnd+1,contentEnd)))return;for(let k=commandStart;k<bodyEnd;k++)masked[k]=' ';for(let k=0;k<4;k++)masked[commandStart+k]='true'[k];i=bodyEnd-1;continue;}
     for(let k=i;k<j;k++) masked[k]=' ';
     for(let k=lineEnd+1;k<bodyEnd;k++) masked[k]=' ';
     i=bodyEnd-1;
   }
   return masked.join('');
+}
+async function logReadPath(root:string,target:string):Promise<boolean>{
+ if(!await localOutput(root,target))return false;const candidate=resolve(root,target);
+ for(const base of [root,tmpdir(),'/tmp']){const rel=relative(base,candidate);if(!safeTaskPath(rel))continue;let path;try{path=await realpath(base);}catch{continue;}for(const part of rel.split(/[\\/]/)){path=resolve(path,part);try{if((await lstat(path)).isSymbolicLink())return false;}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')break;return false;}}}return true;
+}
+async function readOnlyLogBody(root:string,body:string):Promise<boolean>{
+ if(body.length>4096)return false;const lines=body.trim().split('\n').map(s=>s.trim()).filter(Boolean);if(![2,3].includes(lines.length))return false;
+ const m=lines[0].match(/^([A-Za-z_][A-Za-z_0-9]*)\s*=\s*open\((['"])([^'"\\\n]+)(['"])\)\.read\(\)$/);if(!m||m[2]!==m[4]||['print','max','open'].includes(m[1])||!await logReadPath(root,m[3]))return false;
+ let pattern='^print\\('+m[1]+'\\[-([0-9]{1,4}):\\]\\)$';
+ if(lines.length===3){const f=lines[1].match(/^([A-Za-z_][A-Za-z_0-9]*)\s*=\s*([A-Za-z_][A-Za-z_0-9]*)\.find\((['"])([^'"\\\n]*)(['"])\)$/);if(!f||f[2]!==m[1]||f[3]!==f[5]||[m[1],'print','max','open'].includes(f[1]))return false;pattern='^print\\('+m[1]+'\\[max\\(0,\\s*'+f[1]+'\\s*-\\s*([0-9]{1,4})\\):\\s*'+f[1]+'\\s*\\+\\s*([0-9]{1,4})\\]\\)$';}
+ const values=lines.at(-1)!.match(new RegExp(pattern));if(!values)return false;const size=values.slice(1).reduce((n,v)=>n+Number(v),0);return size>0&&size<=4096;
 }
 async function localOutput(root: string, target: string): Promise<boolean> {
   if (/[*?\[\]{}~]/.test(target)) return false;
@@ -108,7 +120,7 @@ async function localOutput(root: string, target: string): Promise<boolean> {
   return false;
 }
 export async function workerAutoCommand(root: string, command: string): Promise<string | undefined> {
-  const literal=literalHeredocs(command);
+  const literal=await literalHeredocs(root,command);
   if(literal===undefined) return;
   command=literal;
   const parts=shellParts(command);
