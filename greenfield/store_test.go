@@ -345,6 +345,14 @@ func (s skeletonTool) Execute(_ context.Context, raw json.RawMessage) (tools.Res
 	if e := os.MkdirAll(filepath.Join(path, "database"), 0755); e != nil {
 		return tools.Result{}, e
 	}
+	if e := os.MkdirAll(filepath.Join(path, "bootstrap"), 0755); e != nil {
+		return tools.Result{}, e
+	}
+	for _, name := range []string{"artisan", "bootstrap/app.php"} {
+		if e := os.WriteFile(filepath.Join(path, name), []byte("<?php"), 0600); e != nil {
+			return tools.Result{}, e
+		}
+	}
 	if e := os.WriteFile(filepath.Join(path, "composer.json"), []byte("{}"), 0600); e != nil {
 		return tools.Result{}, e
 	}
@@ -555,5 +563,54 @@ func TestChatReferenceProvenance(t *testing.T) {
 	}
 	if ReferenceNamed("/", "Use /") || ReferenceNamed("../design", "../design-secret") || !ReferenceNamed("../My Design", "Use `../My Design`") {
 		t.Fatal("literal matching")
+	}
+}
+
+func TestDirectoryInputsAndEnvironmentTemplate(t *testing.T) {
+	s := seeded(t)
+	if !SafeTaskPath(".env.example") || SafeTaskPath(".env.production") || SafeTaskPath(".env.example.bak") {
+		t.Fatal("environment template policy")
+	}
+	if err := os.MkdirAll(filepath.Join(s.Root, "app"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(s.Root, "app/Task.php"), []byte("before"), 0600)
+	f := fixtures(t)[3]
+	f.Content["read"] = []any{"app"}
+	if _, err := s.Save("task", f.ID, f.Content); err != nil {
+		t.Fatal(err)
+	}
+	approved := approve(t, s)
+	before := approved.Files["app"]
+	os.WriteFile(filepath.Join(s.Root, "app/Task.php"), []byte("drift"), 0600)
+	after, err := s.FileHash("app")
+	if err != nil || after == before {
+		t.Fatal("directory did not detect drift", err)
+	}
+	result := execute(t, runtime(t, s, false), f.ID)
+	if !result.IsError || !strings.Contains(resultText(result), "changed since approval") {
+		t.Fatal(resultText(result))
+	}
+	os.WriteFile(filepath.Join(s.Root, "app/.env"), []byte("secret"), 0600)
+	if _, err = s.FileHash("app"); err == nil {
+		t.Fatal("directory exposed credentials")
+	}
+}
+func TestBootstrapRepairsPartialProjectWithoutReplacingFiles(t *testing.T) {
+	s := seeded(t)
+	os.MkdirAll(filepath.Join(s.Root, "app"), 0755)
+	os.WriteFile(filepath.Join(s.Root, "app/Task.php"), []byte("preserve"), 0600)
+	registry := tools.NewRegistry()
+	registry.Register(skeletonTool{s.Root})
+	r := &Runtime{Store: s, Registry: registry}
+	if result := r.bootstrap(context.Background(), "12.*"); result.IsError {
+		t.Fatal(resultText(result))
+	}
+	data, _ := os.ReadFile(filepath.Join(s.Root, "app/Task.php"))
+	if string(data) != "preserve" {
+		t.Fatal("worker files overwritten")
+	}
+	if !skeletonReady(s.Root) {
+		t.Fatal("bootstrap did not materialize framework")
 	}
 }

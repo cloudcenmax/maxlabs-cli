@@ -247,6 +247,13 @@ func (r *Runtime) Execute(ctx context.Context, raw json.RawMessage) (tools.Resul
 			var child tools.Result
 			if version := text(task, "bootstrap"); version != "" {
 				child = r.bootstrap(ctx, version)
+				setup, err := r.Store.recordCheck(args.ID+"-"+run.ID, attempts, 0, "runner: Laravel bootstrap "+version, resultText(child), !child.IsError)
+				if err != nil {
+					return err
+				}
+				run.Bootstrap = &setup
+				packet["bootstrap_evidence"] = setup
+				input, _ = json.Marshal(packet)
 				if !child.IsError {
 					for p := range state.Files {
 						h, e := r.Store.FileHash(p)
@@ -307,12 +314,17 @@ func (r *Runtime) Execute(ctx context.Context, raw json.RawMessage) (tools.Resul
 			if ctx.Err() != nil {
 				run.Status = "interrupted"
 			}
-			for _, p := range Strings(task, "write") {
-				h, e := r.Store.FileHash(p)
-				if e != nil {
-					return e
+			for p := range state.Files {
+				for _, output := range Strings(task, "write") {
+					if p == output || strings.HasPrefix(output, p+"/") {
+						h, err := r.Store.FileHash(p)
+						if err != nil {
+							return err
+						}
+						state.Files[p] = h
+						break
+					}
 				}
-				state.Files[p] = h
 			}
 			if e = r.Store.archiveRun(args.ID, run); e != nil {
 				return e

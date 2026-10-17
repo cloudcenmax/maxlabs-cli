@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { copyFile, mkdir, readFile, readdir, realpath, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, lstat, realpath, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { inputFingerprint } from "./team-files.ts";
 import { Agent, type AgentHooks } from "./agent.ts";
 import { PermissionGuard } from "./permission.ts";
 import { SessionLog, SteeringQueue } from "./session.ts";
@@ -12,7 +13,7 @@ export const teamPack = JSON.parse(await readFile(new URL("../greenfield/pack.js
 export const environmentCommands = ["php --version", "composer --version", "node --version", "npm --version"];
 export const teamInstructions: string = teamPack.instructions.join("\n\n");
 export interface Artifact { kind: string; id: string; path: string; hash: string; summary: string; revision: number }
-export interface TaskRun { id?: string; archive?: string; status: string; attempts: number; output: string; checks: Array<{ command: string; passed: boolean; output: string; log?: string }> }
+export interface TaskRun { id?: string; archive?: string; status: string; attempts: number; output: string; bootstrap?: { command: string; passed: boolean; output: string; log?: string }; checks: Array<{ command: string; passed: boolean; output: string; log?: string }> }
 export interface TeamState {
   schema_version: number; revision: number; artifacts: Artifact[];
   approvals: Record<string, string>; runs: Record<string, TaskRun>; references: Record<string, string>;
@@ -24,7 +25,7 @@ const slug = /^[a-z][a-z0-9-]{0,79}$/;
 const digest = (s: string | Uint8Array): string => createHash("sha256").update(s).digest("hex");
 const emptyState = (): TeamState => ({ schema_version: 1, revision: 0, artifacts: [], approvals: {}, runs: {}, references: {}, files: {} });
 export function safeTaskPath(path: string): boolean {
-  return !!path && !isAbsolute(path) && !/[\\:*?"<>|]/.test(path) && !path.split("/").some(segment => { const p = segment.toLowerCase(); return !p || p === "." || p === ".." || p.endsWith(".") || segment.trim() !== segment || p === ".maxlabs" || p === ".git" || p === ".env" || p.startsWith(".env."); });
+  return !!path && !isAbsolute(path) && !/[\\:*?"<>|]/.test(path) && !path.split("/").some(segment => { const p = segment.toLowerCase(); return !p || p === "." || p === ".." || p.endsWith(".") || segment.trim() !== segment || p === ".maxlabs" || p === ".git" || p === ".env" || (p.startsWith(".env.") && p !== ".env.example"); });
 }
 export function allowedCheck(command: string): boolean {
   return !/[\n\r;&|<>`$(){}\\]/.test(command) && !command.includes("..") && !/(?:^|\s)(?:--env|--configuration|-c|--help|--version|--list-tests|--listTests|--passWithNoTests|--dry-run)(?:=|\s|$)/.test(command)
@@ -78,10 +79,7 @@ export class TeamStore {
     if (digest(raw) !== a.hash) throw new Error(`Artifact ${a.id} changed outside the workflow; save a new revision.`);
     return JSON.parse(raw);
   }
-  async fileHash(path: string): Promise<string> {
-    try { return digest(await readFile(await this.workerPath(path))); }
-    catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return "missing"; throw e; }
-  }
+  async fileHash(path: string): Promise<string> { return inputFingerprint(path, p => this.workerPath(p)); }
   async workerPath(path: string): Promise<string> {
     const candidate = await this.workspace.path(path, true);
     const metadata = await this.path("", true);
@@ -98,19 +96,35 @@ export class TeamStore {
   }
   async bootstrap(version: string, execute: (command: string, signal?: AbortSignal) => Promise<ToolResult>, signal?: AbortSignal): Promise<ToolResult> {
     if (!/^\d+(?:\.\d+)?\.\*$/.test(version)) return { text: "Bootstrap requires a confirmed Laravel version, e.g. 13.*", isError: true };
-    try { const marker = JSON.parse(await readFile(await this.path("bootstrap.json"), "utf8")); if (marker.version === version) return { text: "Laravel skeleton already created by this workflow" }; }
-    catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
-    if ((await readdir(this.workspace.root)).some(p => ![".maxlabs", ".git", ".DS_Store"].includes(p))) return { text: "Bootstrap requires an empty workspace; existing project files are preserved", isError: true };
+    const skeletonReady = async (root: string): Promise<boolean> => {
+      for (const file of ["composer.json", "artisan", "bootstrap/app.php"]) { try { if (!(await stat(await this.workspace.path(relative(this.workspace.root, resolve(root, file))))).isFile()) return false; } catch { return false; } }
+      return true;
+    };
+    let owned = false;
+    try {
+      const marker = JSON.parse(await readFile(await this.path("bootstrap.json"), "utf8"));
+      if (marker.version !== version) return { text: "Bootstrap version differs from the existing workflow skeleton; revise the plan rather than replacing it", isError: true };
+      owned = true;
+      if (marker.status !== "copying" && await skeletonReady(this.workspace.root)) return { text: "Laravel skeleton already created and verified by this workflow" };
+    } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
+    if (!owned) { try { await lstat(resolve(this.workspace.root, "composer.json")); return { text: "Bootstrap will not replace an existing application with composer.json", isError: true }; } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; } }
     const staging = `.maxlabs/team/scaffold-${randomUUID()}`;
     const result = await execute(`composer create-project laravel/laravel "${staging}" "${version}" --no-install --no-interaction --no-scripts`, signal);
     if (result.isError) return result;
     const source = await this.workspace.path(staging);
+    try {
+    if (!await skeletonReady(source)) return { text: "Composer did not produce a complete Laravel skeleton (composer.json, artisan, bootstrap/app.php)", isError: true };
+    await writeFile(await this.path("bootstrap.json", true), JSON.stringify({ version, status: "copying" }), { mode: 0o600 });
     const copy = async (from: string, to: string): Promise<void> => {
       for (const entry of await readdir(from, { withFileTypes: true })) {
-        if (entry.isSymbolicLink() || [".git", ".maxlabs"].includes(entry.name)) continue;
+        if (entry.isSymbolicLink() || [".git", ".maxlabs"].includes(entry.name) || (entry.name !== ".env.example" && (entry.name === ".env" || entry.name.startsWith(".env.")))) continue;
         const destination = await this.workspace.path(relative(this.workspace.root, resolve(to, entry.name)), true);
         if (entry.isDirectory()) { await mkdir(destination, { recursive: true }); await copy(resolve(from, entry.name), destination); }
-        else await copyFile(resolve(from, entry.name), destination, 1);
+        else {
+          try { const existing = await lstat(destination); if (!existing.isFile()) throw new Error(`Bootstrap destination ${entry.name} is not a regular file`); continue; }
+          catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
+          await copyFile(resolve(from, entry.name), destination, 1);
+        }
       }
     };
     await copy(source, this.workspace.root);
@@ -121,8 +135,9 @@ export class TeamStore {
     } catch (e) { if (!["ENOENT", "EEXIST"].includes((e as NodeJS.ErrnoException).code || "")) throw e; }
     try { await writeFile(await this.workspace.path("database/database.sqlite", true), "", { mode: 0o600, flag: "wx" }); }
     catch (e) { if (!["ENOENT", "EEXIST"].includes((e as NodeJS.ErrnoException).code || "")) throw e; }
-    await writeFile(await this.path("bootstrap.json", true), JSON.stringify({ version }), { mode: 0o600 });
-    return { text: `Created official Laravel ${version} skeleton. Dependencies are installed by approved task checks.` };
+    await writeFile(await this.path("bootstrap.json", true), JSON.stringify({ version, status: "complete" }), { mode: 0o600 });
+    return { text: `Created official Laravel ${version} skeleton, preserving existing files. Dependencies are installed by approved task checks.` };
+    } finally { await rm(source, { recursive: true, force: true }); }
   }
   async save(kind: string, id: string, content: Record<string, any>): Promise<TeamStatus> {
     const result = this.#saveQueue.then(() => this.#save(kind, id, content));
@@ -222,6 +237,16 @@ export class TeamStore {
     const ready: string[] = [];
     for (const a of tasks) {
       const task = taskMap.get(a.id); if (!task) continue;
+      for (const path of task.write) {
+        try { if ((await stat(await this.workerPath(path))).isDirectory()) errors.push(`${a.id}: write path ${path} is a directory; list exact writable files`); }
+        catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") errors.push(`${a.id}: ${String((e as Error).message)}`); }
+      }
+      if (task.role === "foundation") {
+        if (!task.bootstrap && task.checks.some((c: string) => c.startsWith("composer install"))) {
+          try { await stat(resolve(this.workspace.root, "composer.json")); } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") errors.push(`${a.id}: missing composer.json; set the foundation task bootstrap field to the confirmed Laravel version`); else throw e; }
+        }
+        for (const aSpec of specs) { const major = docs.get(`spec:${aSpec.id}`)?.stack?.major; if (task.bootstrap && major && task.bootstrap.split(".")[0] !== String(major)) errors.push(`${a.id}: bootstrap version conflicts with spec.stack.major`); }
+      }
       const deps = ancestors(a.id);
       if (task.role !== "foundation" && foundations.length === 1 && !deps.has(foundations[0].id)) errors.push(`${a.id} must depend on foundation`);
       if (task.role === "foundation" && task.depends_on.length) errors.push("Foundation cannot have dependencies");
@@ -339,6 +364,9 @@ export function teamTool(store: TeamStore, child: TeamChild, verify: (command: s
             signal?.throwIfAborted();
             if (task.bootstrap) {
               const setup = await store.bootstrap(task.bootstrap, verify, signal);
+              const log = `.maxlabs/team/checks/${args.id}-${run.id}-${run.attempts}-0.log`;
+              await mkdir(await store.path("checks", true), { recursive: true }); await writeFile(await store.path(log.slice(".maxlabs/team/".length), true), setup.text, { mode: 0o600 });
+              run.bootstrap = { command: "runner: Laravel bootstrap " + task.bootstrap, passed: !setup.isError, output: setup.text, log }; packet.bootstrap_evidence = run.bootstrap;
               if (setup.isError) throw new Error(setup.text);
               for (const path of Object.keys(s.files)) s.files[path] = await store.fileHash(path);
             }
@@ -360,7 +388,7 @@ export function teamTool(store: TeamStore, child: TeamChild, verify: (command: s
             if (!result.isError && task.role !== "qa") for (const command of task.checks) await executeCheck(command);
             run.status = !result.isError && run.checks.length === task.checks.length && run.checks.every(c => c.passed) ? "passed" : "failed";
           } catch (e) { run.status = signal?.aborted ? "interrupted" : "failed"; run.output = String((e as Error).message); }
-          for (const path of task.write) s.files[path] = await store.fileHash(path);
+          for (const path of Object.keys(s.files)) if (task.write.some((output: string) => path === output || output.startsWith(path + "/"))) s.files[path] = await store.fileHash(path);
           run.archive = `.maxlabs/team/runs/${args.id}-${run.id}.json`; const archive = await store.path(run.archive.slice(".maxlabs/team/".length), true);
           await mkdir(resolve(archive, ".."), { recursive: true }); await writeFile(archive, JSON.stringify(run, null, 2), { mode: 0o600 });
           await store.persist(s);

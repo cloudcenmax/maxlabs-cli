@@ -75,7 +75,7 @@ test("real worker tools enforce exact file scope without repeated approval promp
 });
 test("bootstrap uses the official skeleton and refuses an existing application", async () => {
  const root = await mkdtemp(join(tmpdir(), "maxlabs-bootstrap-")); const store = new TeamStore(await Workspace.open(root)); await store.attach(await mkdtemp(join(tmpdir(), "reference-")));
- const result = await store.bootstrap("13.*", async command => { assert.match(command, /^composer create-project laravel\/laravel /); const path = /"(\.maxlabs\/team\/scaffold-[^"]+)"/.exec(command)![1]; await mkdir(join(root, path, "app"), { recursive: true }); await writeFile(join(root, path, "composer.json"), '{}'); await writeFile(join(root, path, "app/Example.php"), '<?php'); return { text: "Created" }; });
+ const result = await store.bootstrap("13.*", async command => { assert.match(command, /^composer create-project laravel\/laravel /); const path = /"(\.maxlabs\/team\/scaffold-[^"]+)"/.exec(command)![1]; await mkdir(join(root, path, "app"), { recursive: true }); await mkdir(join(root, path, "bootstrap"), { recursive: true }); await writeFile(join(root, path, "artisan"), "<?php"); await writeFile(join(root, path, "bootstrap/app.php"), "<?php"); await writeFile(join(root, path, "composer.json"), '{}'); await writeFile(join(root, path, "app/Example.php"), '<?php'); return { text: "Created" }; });
  assert.equal(result.isError, undefined); assert.equal(await readFile(join(root, "app/Example.php"), "utf8"), "<?php");
  assert.equal((await store.bootstrap("12.*", async () => { throw new Error("Must not execute"); })).isError, true);
 });

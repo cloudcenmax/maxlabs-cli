@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"censi/harness/internal/tools"
@@ -28,24 +29,25 @@ func (r *Runtime) bootstrap(ctx context.Context, version string) tools.Result {
 	}
 
 	raw, e := os.ReadFile(marker)
+	owned := false
 	if e == nil {
 		var saved map[string]string
 		if json.Unmarshal(raw, &saved) != nil {
 			return tools.Error("invalid bootstrap marker")
 		}
-		if saved["version"] == version {
-			return tools.Text("Laravel skeleton already created by this workflow")
+		if saved["version"] != version {
+			return tools.Error("bootstrap version differs from the existing workflow skeleton; revise the plan rather than replacing it")
+		}
+		owned = true
+		if saved["status"] != "copying" && skeletonReady(r.Store.Root) {
+			return tools.Text("Laravel skeleton already created and verified by this workflow")
 		}
 	} else if !errors.Is(e, os.ErrNotExist) {
 		return tools.Error(e.Error())
 	}
-	entries, e := os.ReadDir(r.Store.Root)
-	if e != nil {
-		return tools.Error(e.Error())
-	}
-	for _, entry := range entries {
-		if entry.Name() != ".maxlabs" && entry.Name() != ".git" && entry.Name() != ".DS_Store" {
-			return tools.Error("bootstrap requires an empty workspace; existing files are preserved")
+	if !owned {
+		if _, err := os.Lstat(filepath.Join(r.Store.Root, "composer.json")); !errors.Is(err, os.ErrNotExist) {
+			return tools.Error("bootstrap will not replace an existing application with composer.json")
 		}
 	}
 	staging := fmt.Sprintf(".maxlabs/team/scaffold-%d", time.Now().UnixNano())
@@ -58,6 +60,14 @@ func (r *Runtime) bootstrap(ctx context.Context, version string) tools.Result {
 	if e != nil {
 		return tools.Error(e.Error())
 	}
+	defer os.RemoveAll(source)
+	if !skeletonReady(source) {
+		return tools.Error("Composer did not produce a complete Laravel skeleton (composer.json, artisan, bootstrap/app.php)")
+	}
+	raw, _ = json.Marshal(map[string]string{"version": version, "status": "copying"})
+	if e = os.WriteFile(marker, raw, 0600); e != nil {
+		return tools.Error(e.Error())
+	}
 	e = filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -68,7 +78,7 @@ func (r *Runtime) bootstrap(ctx context.Context, version string) tools.Result {
 		if entry.Type()&os.ModeSymlink != 0 {
 			return nil
 		}
-		if entry.Name() == ".git" || entry.Name() == ".maxlabs" {
+		if entry.Name() == ".git" || entry.Name() == ".maxlabs" || (entry.Name() != ".env.example" && (entry.Name() == ".env" || strings.HasPrefix(entry.Name(), ".env."))) {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
@@ -84,6 +94,14 @@ func (r *Runtime) bootstrap(ctx context.Context, version string) tools.Result {
 		}
 		if entry.IsDir() {
 			return os.MkdirAll(destination, 0755)
+		}
+		if info, err := os.Lstat(destination); err == nil {
+			if !info.Mode().IsRegular() {
+				return fmt.Errorf("bootstrap destination %s is not a regular file", rel)
+			}
+			return nil // a retry fills missing framework files; it never overwrites worker changes
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
 		}
 		input, err := os.Open(path)
 		if err != nil {
@@ -133,9 +151,24 @@ func (r *Runtime) bootstrap(ctx context.Context, version string) tools.Result {
 	} else if !errors.Is(e, os.ErrExist) && !errors.Is(e, os.ErrNotExist) {
 		return tools.Error(e.Error())
 	}
-	raw, _ = json.Marshal(map[string]string{"version": version})
+	raw, _ = json.Marshal(map[string]string{"version": version, "status": "complete"})
 	if e = os.WriteFile(marker, raw, 0600); e != nil {
 		return tools.Error(e.Error())
 	}
-	return tools.Text("Created official Laravel " + version + " skeleton. Dependencies are installed by approved task checks.")
+	return tools.Text("Created official Laravel " + version + " skeleton, preserving existing files. Dependencies are installed by approved task checks.")
+}
+
+// A marker alone is not evidence that a skeleton exists.
+func skeletonReady(root string) bool {
+	for _, name := range []string{"composer.json", "artisan", "bootstrap/app.php"} {
+		path, err := SafePath(root, name)
+		if err != nil {
+			return false
+		}
+		info, err := os.Stat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			return false
+		}
+	}
+	return true
 }

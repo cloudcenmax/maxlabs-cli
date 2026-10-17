@@ -30,12 +30,13 @@ type Check struct {
 	Output  string `json:"output"`
 }
 type Run struct {
-	ID       string  `json:"id,omitempty"`
-	Archive  string  `json:"archive,omitempty"`
-	Status   string  `json:"status"`
-	Attempts int     `json:"attempts"`
-	Output   string  `json:"output"`
-	Checks   []Check `json:"checks"`
+	ID        string  `json:"id,omitempty"`
+	Archive   string  `json:"archive,omitempty"`
+	Status    string  `json:"status"`
+	Attempts  int     `json:"attempts"`
+	Output    string  `json:"output"`
+	Checks    []Check `json:"checks"`
+	Bootstrap *Check  `json:"bootstrap,omitempty"`
 }
 type State struct {
 	Files         map[string]string `json:"files"`
@@ -263,7 +264,7 @@ func SafeTaskPath(p string) bool {
 			return false
 		}
 		part = strings.ToLower(part)
-		if part == "" || part == "." || part == ".." || part == ".maxlabs" || part == ".git" || part == ".env" || strings.HasPrefix(part, ".env.") {
+		if part == "" || part == "." || part == ".." || part == ".maxlabs" || part == ".git" || part == ".env" || (strings.HasPrefix(part, ".env.") && part != ".env.example") {
 			return false
 		}
 	}
@@ -598,7 +599,38 @@ func (s *Store) Status(state *State) (Status, error) {
 		id := a.ID
 		d := tasks[id]
 		deps := ancestors(id, map[string]bool{})
+		for _, p := range Strings(d, "write") {
+			target, err := SafeWorkerPath(s.Root, p)
+			if err != nil {
+				out.Errors = append(out.Errors, id+": "+err.Error())
+				continue
+			}
+			if info, err := os.Stat(target); err == nil && info.IsDir() {
+				out.Errors = append(out.Errors, id+": write path "+p+" is a directory; list exact writable files")
+			}
+		}
 		role := text(d, "role")
+		if role == "foundation" {
+			version := text(d, "bootstrap")
+			if version == "" {
+				if _, err := os.Stat(filepath.Join(s.Root, "composer.json")); errors.Is(err, os.ErrNotExist) {
+					for _, c := range Strings(d, "checks") {
+						if strings.HasPrefix(c, "composer install") {
+							out.Errors = append(out.Errors, id+": missing composer.json; set the foundation task bootstrap field to the confirmed Laravel version")
+							break
+						}
+					}
+				}
+			}
+			if version != "" {
+				for _, spec := range byKind["spec"] {
+					stack, _ := docs["spec:"+spec.ID]["stack"].(map[string]any)
+					if major := text(stack, "major"); major != "" && strings.Split(version, ".")[0] != major {
+						out.Errors = append(out.Errors, id+": bootstrap version conflicts with spec.stack.major")
+					}
+				}
+			}
+		}
 		if role != "foundation" && len(foundations) == 1 && !deps[foundations[0]] {
 			out.Errors = append(out.Errors, id+" must depend on foundation")
 		}
@@ -855,21 +887,6 @@ func (s *Store) Reference(id, path string) (string, error) {
 	}
 	raw, e := os.ReadFile(p)
 	return "<reference-data>\n" + string(raw) + "\n</reference-data>", e
-}
-
-func (s *Store) FileHash(path string) (string, error) {
-	p, e := SafeWorkerPath(s.Root, path)
-	if e != nil {
-		return "", e
-	}
-	raw, e := os.ReadFile(p)
-	if errors.Is(e, os.ErrNotExist) {
-		return "missing", nil
-	}
-	if e != nil {
-		return "", e
-	}
-	return hash(raw), nil
 }
 
 func SafeWorkerPath(root, path string) (string, error) {
