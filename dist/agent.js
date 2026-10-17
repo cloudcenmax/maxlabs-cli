@@ -24,6 +24,7 @@ import { emptyUsage } from "./types.js";
 
 
 
+
 const toolOrder = ["read", "write", "edit", "glob", "grep", "bash", "webfetch", "delegate"];
 
 export class Agent {
@@ -73,6 +74,7 @@ export class Agent {
 
       this.log.append("assistant", response.message);
       result.usage = addUsage(result.usage, response.usage);
+      this.hooks.onUsage?.(response.usage);
       result.webSearches += response.usage.webSearches;
       searchesLeft = Math.max(0, searchesLeft - response.usage.webSearches);
       const calls = response.message.content.filter((block) => block.type === "tool_call");

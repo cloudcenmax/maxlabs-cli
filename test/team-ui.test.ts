@@ -11,6 +11,7 @@ import { referenceNamed } from "../src/team-reference.ts";
 const fixtures = JSON.parse(await readFile(new URL("../greenfield/fixtures.json", import.meta.url), "utf8"));
 async function seed() {
  const store = new TeamStore(await Workspace.open(await mkdtemp(join(tmpdir(), "team-ui-"))));
+ await store.setExecutionMode("scoped");
  for (const f of fixtures) await store.save(f.kind, f.id, f.content);
  return store;
 }

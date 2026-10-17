@@ -17,6 +17,7 @@ type Pack struct {
 	Label         string              `json:"label"`
 	Framework     string              `json:"framework"`
 	Kinds         map[string][]string `json:"kinds"`
+	FlexibleKinds map[string][]string `json:"flexible_kinds"`
 	CheckPrefixes []string            `json:"check_prefixes"`
 	Instructions  []string            `json:"instructions"`
 }

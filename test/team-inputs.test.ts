@@ -6,7 +6,7 @@ import test from 'node:test';
 import { TeamStore, safeTaskPath, teamTool } from '../src/greenfield.ts';
 import { Workspace } from '../src/tools.ts';
 const fixtures=JSON.parse(await readFile(new URL('../greenfield/fixtures.json',import.meta.url),'utf8'));
-async function seed(){const root=await mkdtemp(join(tmpdir(),'team-inputs-'));const store=new TeamStore(await Workspace.open(root));for(const f of fixtures)await store.save(f.kind,f.id,f.content);return {store,root};}
+async function seed(){const root=await mkdtemp(join(tmpdir(),'team-inputs-'));const store=new TeamStore(await Workspace.open(root));await store.setExecutionMode("scoped");for(const f of fixtures)await store.save(f.kind,f.id,f.content);return {store,root};}
 test('directory reads approve, detect changed children, and refresh after approved writes',async()=>{
  const {store,root}=await seed();await mkdir(join(root,'app'),{recursive:true});await writeFile(join(root,'app/Task.php'),'before');
  const f=fixtures[3];await store.save('task',f.id,{...f.content,read:['app']});let s=await store.status();await store.approve('design',s.gates.design);s=await store.status();await store.approve('spec',s.gates.spec);

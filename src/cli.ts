@@ -435,7 +435,7 @@ async function main(): Promise<void> {
   async function executeApproved(): Promise<void> {
     router.busy = true; activeAbort = new AbortController();
     try { process.stdout.write((await runApprovedTasks(teamStore, workflow, activeAbort.signal, () => { const directions = router.steering.drain(); if (directions.length) { for (const text of directions) agent.log.append("steering", { role: "user", content: [{ type: "text", text }], source: "user" }); throw new Error("Execution stopped before the next task to review the new direction: " + directions.join("\n") + ". Update and review affected contracts before continuing."); } }, event => { clearStatus(); process.stdout.write(`${event.status === "passed" ? ui.success("✓") : ui.brand("→")} ${event.completed}/${event.total} · ${event.summary}\n`); })) + "\n"); }
-    finally { clearStatus(); router.busy = false; activeAbort = undefined; }
+    finally { clearStatus(); router.busy = false; activeAbort = undefined; process.stdout.write(teamStatusText(await teamStore.status()) + "\n"); }
   }
 
   async function command(text: string): Promise<boolean> {
@@ -446,7 +446,9 @@ async function main(): Promise<void> {
         try {
           const action = argument || "on";
           if (action === "off") { teamMode = false; agent.log.ensureSystem(systemPrompt(guard.mode)); agent.log.append("steering", { role: "user", content: [{ type: "text", text: "Greenfield SDE Team workflow is disabled. Follow ordinary CLI instructions and permission mode until explicitly re-enabled." }], source: "user" }); process.stdout.write("Greenfield SDE Team disabled. Artifacts are preserved.\n"); }
-          else if (action === "on") { teamMode = true; if (guard.mode === "plan") guard.mode = "act"; process.stdout.write("Greenfield SDE Team · Beta · Laravel\nDescribe your idea. We’ll refine the scope and design together.\nShare an existing design in chat whenever useful. /team status shows the next step.\n"); }
+          else if (action === "on") { teamMode = true; if (guard.mode === "plan") guard.mode = "act"; process.stdout.write("Greenfield SDE Team · Beta\nDescribe your idea. We’ll refine the scope and design together.\nShare an existing design in chat whenever useful. /team status shows the next step.\n"); }
+          else if (action === "mode") { const status = await teamStore.setExecutionMode(arguments_[1]); process.stdout.write(`Execution: ${status.execution_mode}. Review and reapprove the plan before running workers.\n`); }
+          else if (action === "workspace") { const status = await teamStore.status(); process.stdout.write(status.execution ? `Combined build: ${await teamStore.path(status.execution.path)}\nBranch: ${status.execution.branch}\nEach worker uses its own branch. Source applies on release acceptance.\n` : "No build workspace yet. Approve a plan to begin.\n"); }
           else if (action === "reference") { const status = await teamStore.attach(arguments_.slice(1).join(" ")); process.stdout.write("Design reference added. You can ask the team to use it now.\n"); }
           else if (action === "approve") { const status = await teamStore.status(); const gate = arguments_[1]; const approved = await teamStore.approve(gate, status.gates[gate]); process.stdout.write(`Approved ${gate}. Stage: ${approved.stage}.\n`); if (gate !== "release") { teamMode = true; if (guard.mode === "plan") guard.mode = "act"; if (gate === "spec") await executeApproved(); else await runTurn(`Continue Greenfield SDE Team from the approved ${gate}. Use team status and follow the workflow.`); } }
           else if (action === "run") { teamMode = true; if (guard.mode === "plan") guard.mode = "act"; await executeApproved(); }
@@ -454,7 +456,7 @@ async function main(): Promise<void> {
           else if (action === "show") { const status = await teamStore.status(); const id = arguments_[1] === "--json" ? "" : arguments_[1]; const artifacts = id ? status.artifacts.filter(a => a.id === id) : status.artifacts.filter(a => ["brief", "spec", "task", "release"].includes(a.kind)); if (!artifacts.length) throw new Error(id ? "Unknown artifact ID" : "No plan saved yet. Continue discovery."); for (const a of artifacts) { const content = await teamStore.content(a); delete content.prototype_html; const run = status.runs[a.id]; process.stdout.write(`\n${ui.bold(a.kind + " · " + a.id)}\n` + (arguments_.includes("--json") ? JSON.stringify({ ...content, ...(run ? { execution: run } : {}) }, null, 2) : teamArtifactText({ ...content, ...(run ? { execution: run } : {}) })) + "\n"); } }
           else if (action === "preview") { const preview = await teamPreview.show(); process.stdout.write(`${preview.opened ? "Design opened in your browser" : "Open this design in your browser"}:\n${preview.url}\nKeep this CLI session open while previewing.\n`); }
           else if (action === "model") { const id = arguments_[1] || ""; if (id && !models.some(m => m.id === id)) throw new Error("Choose an enabled model from /model"); teamWorkerModel = id; process.stdout.write(`Worker model: ${id || "same as planner"}\n`); }
-          else process.stdout.write("/team [on|off|preview|run|status [--json]|show [ID] [--json]|reference PATH|approve design|spec|release]\n");
+          else process.stdout.write("/team [on|off|mode flexible|scoped|workspace|preview|run|status [--json]|show [ID] [--json]|reference PATH|approve design|spec|release]\n");
         } catch (e) { process.stdout.write(`${ui.error(messageOf(e))}\n`); }
         break;
       }
@@ -556,7 +558,9 @@ function help(): void {
   /plan       inspect and plan; refuse mutations
   /act        ask before state-changing operations
   /auto       run audited safe work; still catch destructive drift
-  /team       Greenfield SDE Team (Beta), Laravel discovery through delivery
+  /team       Greenfield SDE Team (Beta), idea through verified delivery
+  /team mode flexible|scoped  choose worker autonomy (reapproval required)
+  /team workspace  show the combined build folder and branch
   /team status  inspect stages, artifacts, task results and readiness errors
   /team show ID  inspect a saved artifact before approval
   /team preview  export the current interactive design preview

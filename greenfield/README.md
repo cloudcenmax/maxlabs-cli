@@ -1,85 +1,72 @@
-# Greenfield SDE Team contract v1
+# Greenfield SDE Team protocol v1
 
-`pack.json` is consumed by both the npm CLI and the Go desktop harness. Its
-required fields, Laravel instructions, and permitted check prefixes form one
-versioned protocol. `fixtures.json` exercises the same contracts in both runtime
-test suites. The Go adapter is in this package; the TypeScript adapter is
-`src/greenfield.ts`. Neither requires a YAML parser or an external workflow server.
+`pack.json` supplies both clients with flexible artifact fields, conditional stack
+guidance, and legacy scoped rules. Canonical JSON storage is YAML 1.2 compatible;
+no workflow server or YAML parser is required. Artifact files are immutable and
+hash checked; human-only design, specification and release approvals bind to
+artifact/reference fingerprints. Planning changes invalidate affected gates.
 
-## Artifacts and approvals
+## Outcome briefs
 
-Artifacts are immutable files with SHA-256 checksums, indexed in `state.json`.
-Saving a changed artifact retains earlier files. The manifest contains current
-artifact references, human approval fingerprints, task results, input file
-fingerprints, and explicitly attached reference directories. Treat planning state
-as trusted local project data, not a secure multi-user approval service.
+New projects default to `execution_mode: flexible`. A task needs a summary and
+observable acceptance outcomes. Optional role is implementation (default),
+foundation or qa; `depends_on` is an array of task IDs. Files/commands are hints,
+not allowlists. Set `serial: true` when work must run alone. Plans require an
+acyclic graph, resolved decisions/review blockers, and independent QA following
+all implementation/foundation work. Stack and architecture come from the spec.
+Laravel-specific guidance applies only when Laravel is selected.
 
-Only human client controls can approve design, spec, and release. The model tool
-has no approval operation. Design approval covers the brief and prototype; spec
-approval covers the brief, design, spec, tasks, integrations, planning reviews,
-and reference attachments. Source evidence does not invalidate an approved plan.
-Release acceptance requires all tasks, including independent QA, to pass.
+Existing state without execution_mode loads as `scoped`, preserving historical
+Laravel exact-file scopes, approved commands, foundation ordering and coverage.
+Human `/team mode flexible` or desktop settings migrates it and invalidates
+spec/release approval. Models have no mode-switch or approval tool.
 
-The readiness compiler checks required artifact fields, unresolved decisions,
-unique acceptance IDs with expected behavior, requirement coverage, task paths,
-command prefixes, dependency existence/cycles, foundation ordering, and QA
-ordering/read-only scope. Semantic correctness still requires review and tests.
-Task roles are `foundation`, `implementation`, and `qa`. Bootstrap is an optional
-foundation-only string such as `"13.*"`; use the version agreed during planning.
+## Execution and integration
 
-## Execution
+The dispatcher executes ready waves of up to three workers, eight tasks per
+batch, with three attempts per task and forty model steps per child. Shared
+setup can precede parallel feature slices; QA follows the combined result.
+A cross-client project lease protects state mutations, refreshed every ten
+seconds and expiring after two minutes without a heartbeat.
 
-The planner can inspect, save artifacts, read attached references, fetch public
-reference documentation, delegate bounded research, and run ready tasks. It
-cannot bypass the runner with direct edits, shell execution, or ordinary
-unscoped delegation. Researchers cannot implement. Workers get fresh sessions
-with the approved task and contracts; prototype HTML and raw evidence are omitted
-from their initial context. Context over 96 KB is rejected for refinement.
+A runner-owned source snapshot repository lives under `.maxlabs/team/execution`.
+It excludes .env, credential metadata, symlinks and dependency trees, bounded to
+5000 files / 64 MiB. Each task gets its own branch/worktree, normal project tools,
+a scrubbed provider-credential environment, approved briefs and previous evidence.
+Context is bounded to 96 KB and tool results to 16 KB. Runtime dependencies and
+local environment setup must be installed in worktrees; these are not shared.
 
-Workers return `{"outcome":"completed","summary":"...","blockers":[]}` or a
-blocked report. A completed report alone cannot pass a task: the runner executes
-every approved check and records its output. File writes are limited to exact
-paths, verified against canonical workspace containment. Commands are restricted
-to known verification/setup prefixes and cannot contain shell composition or
-expansion. Commands and project scripts retain normal OS permissions.
+The `verify` tool records actual command results; a completed JSON report alone
+cannot pass a task. Workers choose the real tests and may repair failures.
+Successful implementation branches merge serially with Git. Conflicts abort the
+merge, preserve both branches/evidence and stop the next wave. Failed attempts
+retain checkpoint commits so retries can reconcile with newer integration work.
+QA receives the combined diff and implementation evidence, runs its own checks,
+and must leave application source unchanged. Semantic correctness and adequate
+test coverage still require independent review; a command exit code proves only
+that the command succeeded.
 
-A cross-process directory lease serializes mutations and execution across CLI
-and desktop. It is refreshed every ten seconds and expires after two minutes
-without a heartbeat. Interrupted runs remain visible and can be retried; input
-changes from an abruptly terminated worker require explicit spec reapproval.
-Retries stop after three attempts; a human can review and reapprove to reset
-failed attempts. Application workers are sequential so shared databases, routes,
-and contracts cannot race. Research is parallel, with serialized permission
-prompts and artifact persistence.
+Release acceptance verifies the combined source still matches QA's snapshot and
+checks every destination change against the original baseline before applying
+source. It never deploys or publishes. The original Git checkout remains on its
+branch with changes available for review/commit. Worktree branches and immutable
+attempt reports remain available for inspection; automatic cleanup is not yet
+implemented. This is Git isolation, not an OS sandbox: shell programs retain
+normal OS permissions, with ordinary high-impact operation approval checks.
 
-## Reference and integration research
+## Design and API evidence
 
-Reference roots can be attached through client controls or the planner’s
-`attach_reference` action when the exact literal path occurs in a human-authored
-chat turn. The planner guard rejects paths sourced only from assistant/tool text;
-researchers and workers cannot attach folders. Design inspiration is optional. Reads
-resolve canonical paths, reject traversal and symlink escapes, omit dependency
-folders from directory listings, and refuse environment/Git metadata. References
-are read-only and are not executable instructions. The approved design captures
-the selected reference's intended tokens, components, and behavior.
+Discovery may casually ask about existing design inspiration; it is optional.
+Only exact human-supplied paths can be attached by the planner. Attached roots
+are read-only, with canonical path containment, credential and symlink checks.
+Desktop provides a collapsible preview panel; CLI opens the OS browser.
 
-Successful research fetches automatically create source evidence artifacts.
-The planner normalizes required API methods into integration contracts, keeping
-source URLs, API versions, authentication, errors, retries, unknowns, and evidence
-status explicit. `documented`, `schema_validated`, and `sandbox_tested` describe
-different evidence; neither a source summary nor a mock is a live sandbox test.
-No credentials belong in contracts. Source snapshots are not refreshed silently;
-the planner decides when research is needed and a changed integration contract
-requires spec reapproval.
-
-## Beta limits
-
-Only Laravel is supported. Storage is JSON, not arbitrary YAML syntax. The task
-compiler validates and dispatches model-authored plans rather than synthesizing
-Laravel code deterministically. Deployment remains a separately authorized
-operation. Browser and visual QA depend on configured project checks and human
-inspection. Provider calls and real external integrations need live acceptance
-testing beyond the offline harness suite.
+Up to three bounded research jobs run concurrently, six per turn. Successful
+fetches preserve source URL, retrieval time, content hash and content. Normalize
+only needed operations into concise integration briefs, retaining unknowns,
+authentication, schemas, errors, pagination and retry/webhook details as relevant.
+Truncated sources remain excerpts. Documented schemas and mocks do not prove live
+API behavior. Six fetches per agent bound repeated documentation costs.
 
 ## Live acceptance-test metering
 
@@ -95,26 +82,4 @@ and `GREENFIELD_E2E_MAX_CALLS` as needed. The default request ceiling is 120.
 Input buckets are disjoint: uncached input + cache reads + cache writes. Reasoning
 is a subset of output and must not be added again. Missing usage is reported as
 unknown. Token counts alone do not establish a monetary cost; use actual account
-billing or applicable provider prices. Normal client turn meters currently show
-the coordinator's usage; use the relay when measuring the whole team.
-
-Planners and each researcher have a six-fetch documentation ceiling. The fixed
-`team environment` action observes installed tool versions without exposing an
-arbitrary shell. `team artifact` reads contracts without loading prototype HTML
-and limits evidence excerpts; complete snapshots remain on disk. Workflow policy
-is sent once in the system policy rather than duplicated in user history.
-
-
-Approved batches dispatch ready tasks deterministically, up to eight, without
-coordinator inference. The first failure stops the batch. Successful delivery
-creates a runner-authored release with check evidence and the approved setup
-instructions, and still requires client release acceptance. Retry packets include
-previous failure summaries; check logs and immutable attempt reports preserve
-details across reapproval. Worker report formatting gets one tool-free repair.
-The model receives at most 16 KB per tool result; evidence hooks retain the
-original result. Retrieve targeted source ranges when output is marked truncated.
-
-Task `read` paths identify fingerprinted inputs, not a read sandbox. Workers can
-inspect other code inside the workspace; exact path enforcement applies to their
-file mutations. New direction stops deterministic execution at a task boundary
-so affected contracts can be reviewed. QA receives check evidence before review.
+billing or applicable provider prices. Flexible worker attempts store provider token receipts in their run records; latest-attempt totals exclude previous attempts and planner/research usage. Use the relay for complete whole-team metering.

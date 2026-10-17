@@ -1,6 +1,8 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, readdir, lstat, realpath, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { flexibleChild, runFlexibleWave } from "./team-flexible.js";
+import { applyExecution,                         } from "./team-workspace.js";
 import { inputFingerprint } from "./team-files.js";
 import { Agent,                 } from "./agent.js";
 import { PermissionGuard } from "./permission.js";
@@ -20,10 +22,11 @@ export const teamInstructions         = teamPack.instructions.join("\n\n");
 
 
 
+
 const arrayKeys = new Set(["users", "workflows", "scope", "exclusions", "open_questions", "screens", "components", "states", "entities", "authorization", "operations", "acceptance", "edge_cases", "depends_on", "requirements", "read", "write", "checks", "sources", "unknowns", "findings", "blockers"]);
 const slug = /^[a-z][a-z0-9-]{0,79}$/;
 const digest = (s                     )         => createHash("sha256").update(s).digest("hex");
-const emptyState = ()            => ({ schema_version: 1, revision: 0, artifacts: [], approvals: {}, runs: {}, references: {}, files: {} });
+const emptyState = ()            => ({ execution_mode: "flexible", schema_version: 1, revision: 0, artifacts: [], approvals: {}, runs: {}, references: {}, files: {} });
 export function safeTaskPath(path        )          {
   return !!path && !isAbsolute(path) && !/[\\:*?"<>|]/.test(path) && !path.split("/").some(segment => { const p = segment.toLowerCase(); return !p || p === "." || p === ".." || p.endsWith(".") || segment.trim() !== segment || p === ".maxlabs" || p === ".git" || p === ".env" || (p.startsWith(".env.") && p !== ".env.example"); });
 }
@@ -40,7 +43,7 @@ export class TeamStore {
     try {
       const s = JSON.parse(await readFile(await this.path("state.json"), "utf8"));
       if (s.schema_version !== 1 || !Array.isArray(s.artifacts) || !s.approvals || !s.runs || !s.references) throw new Error("Unsupported or invalid team state");
-      s.files ||= {};
+      s.files ||= {}; s.execution_mode ||= "scoped";
       return s;
     } catch (e) { if ((e                         ).code === "ENOENT") return emptyState(); throw e; }
   }
@@ -146,18 +149,31 @@ export class TeamStore {
   }
   async #save(kind        , id        , content                     )                      {
     return this.locked(async s => {
-      const required                       = teamPack.kinds[kind];
+      const flex = s.execution_mode === "flexible";
+      const required                       = (flex ? teamPack.flexible_kinds : teamPack.kinds)[kind];
       if (typeof kind !== "string" || typeof id !== "string" || !Array.isArray(required) || !slug.test(id)) throw new Error("Unknown artifact kind or invalid lowercase slug ID");
       if (!content || Array.isArray(content) || typeof content !== "object") throw new Error("content must be a JSON object");
       if (JSON.stringify(content).length > 200_000) throw new Error("Artifact exceeds 200 KB; split it into smaller contracts");
       if (s.artifacts.length >= 128 && !s.artifacts.some(a => a.kind === kind && a.id === id)) throw new Error("Beta supports 128 artifacts per project");
       if (kind === "task" && s.artifacts.filter(a => a.kind === "task" && a.id !== id).length >= 64) throw new Error("Split the release into at most 64 tasks");
+      if (flex) {
+        content = structuredClone(content);
+        for (const key of teamPack.kinds[kind] || []) if (arrayKeys.has(key)) content[key] ??= [];
+        if (kind === "task") content.role ||= "implementation";
+        if (kind === "spec") { content.stack ||= {}; content.acceptance = content.acceptance.map((v     , i        ) => typeof v === "string" ? { id: `outcome-${i+1}`, expect: v } : v); }
+        for (const key of arrayKeys) if (key in content && !Array.isArray(content[key])) throw new Error(`${key} must be an array`);
+      }
       for (const key of required) {
         if (!(key in content)) throw new Error(`${kind}.${key} is required`);
         if (arrayKeys.has(key) && !Array.isArray(content[key])) throw new Error(`${key} must be an array`);
       }
       if (typeof content.summary !== "string" || !content.summary.trim()) throw new Error("summary must be nonempty");
-      if (kind === "task") {
+      if (kind === "task" && flex) {
+        if (content.serial !== undefined && typeof content.serial !== "boolean") throw new Error("serial must be a boolean");
+        if (!["foundation", "implementation", "qa"].includes(content.role) || !content.acceptance.length) throw new Error("Task needs a role and observable acceptance outcomes");
+        if (content.depends_on.some((v         ) => typeof v !== "string" || !v)) throw new Error("Dependencies must contain task IDs");
+      }
+      if (kind === "task" && !flex) {
         if (content.bootstrap !== undefined && (content.role !== "foundation" || typeof content.bootstrap !== "string" || !/^\d+(?:\.\d+)?\.\*$/.test(content.bootstrap))) throw new Error("Only the foundation task may bootstrap a confirmed Laravel version");
         if (!["foundation", "implementation", "qa"].includes(content.role)) throw new Error("Invalid task role");
         if (!content.requirements.length || !content.acceptance.length || !content.checks.length) throw new Error("Tasks require requirements, acceptance, and checks");
@@ -167,7 +183,7 @@ export class TeamStore {
         if (content.role === "qa" && content.write.length) throw new Error("QA tasks are read-only");
       }
       if (kind === "design" && (typeof content.prototype_html !== "string" || !content.prototype_html.trim())) throw new Error("Design requires prototype_html");
-      if (kind === "integration" && !["documented", "schema_validated", "sandbox_tested", "unknown", "conflicting"].includes(content.evidence_status)) throw new Error("Invalid evidence_status");
+      if (!flex && kind === "integration" && !["documented", "schema_validated", "sandbox_tested", "unknown", "conflicting"].includes(content.evidence_status)) throw new Error("Invalid evidence_status");
       s.revision++;
       const path = `artifacts/${kind}-${id}-${s.revision}.json`;
       const raw = JSON.stringify(content, null, 2) + "\n";
@@ -189,12 +205,13 @@ export class TeamStore {
       try { active = Date.now() - (await stat(await this.path(".lock"))).mtimeMs < 120_000; } catch (e) { if ((e                         ).code !== "ENOENT") throw e; }
       if (!active) for (const run of Object.values(s.runs)) if (["running", "checking"].includes(run.status)) { run.status = "interrupted"; run.output = "Previous execution was interrupted; inspect changes before retrying."; }
     }
+    const flex = s.execution_mode === "flexible";
     const docs = new Map                             ();
     const errors           = [];
     for (const a of s.artifacts) { try { docs.set(`${a.kind}:${a.id}`, await this.content(a)); } catch (e) { errors.push(String((e         ).message)); } }
     const select = (kind        )             => s .artifacts.filter(a => a.kind === kind);
-    const gate = (kinds          )         => digest(s .artifacts.filter(a => kinds.includes(a.kind)).map(a => `${a.kind}:${a.id}:${a.hash}`).sort().join("\n") + "\nreferences:" + Object.entries(s .references).sort().map(([k,v]) => `${k}:${v}`).join("\n"));
-    const gates = { design: gate(["brief", "design"]), spec: gate(["brief", "design", "spec", "task", "integration", "review"]), release: gate(Object.keys(teamPack.kinds).filter(k => k !== "evidence")) };
+    const gate = (kinds          , execution = false)         => digest(s .artifacts.filter(a => kinds.includes(a.kind)).map(a => `${a.kind}:${a.id}:${a.hash}`).sort().join("\n") + "\nreferences:" + Object.entries(s .references).sort().map(([k,v]) => `${k}:${v}`).join("\n") + (flex && execution ? "\nexecution:flexible-v1" : ""));
+    const gates = { design: gate(["brief", "design"]), spec: gate(["brief", "design", "spec", "task", "integration", "review"], true), release: gate(Object.keys(teamPack.kinds).filter(k => k !== "evidence"), true) };
     const approved = (g        )          => s .approvals[g] === gates[g];
     const specs = select("spec");
     const requirements = new Set        ();
@@ -202,8 +219,8 @@ export class TeamStore {
       const spec = docs.get(`spec:${a.id}`);
       if (!spec) continue;
       if (spec.open_questions.length) errors.push("Spec has unresolved questions");
-      if (spec.stack?.framework !== "laravel") errors.push("This beta requires stack.framework: laravel");
-      for (const key of ["entities", "authorization", "operations", "acceptance"]) if (!spec[key].length) errors.push(`Spec ${key} must be defined`);
+      if (!flex && spec.stack?.framework !== "laravel") errors.push("This beta requires stack.framework: laravel");
+      for (const key of (flex ? ["acceptance"] : ["entities", "authorization", "operations", "acceptance"])) if (!spec[key].length) errors.push(`Spec ${key} must be defined`);
       for (const ac of spec.acceptance) {
         if (!ac || typeof ac.id !== "string" || !ac.id || typeof ac.expect !== "string" || !ac.expect.trim() || requirements.has(ac.id)) errors.push("Spec acceptance needs unique IDs and concrete expect statements");
         else requirements.add(ac.id);
@@ -218,7 +235,7 @@ export class TeamStore {
     const qa = tasks.filter(a => taskMap.get(a.id)?.role === "qa");
     if (specs.length !== 1) errors.push("Exactly one spec is required");
     if (select("brief").length !== 1 || select("design").length !== 1) errors.push("Exactly one brief and design are required");
-    if (foundations.length !== 1 || !qa.length) errors.push("Plan needs exactly one foundation task and at least one independent QA task");
+    if ((!flex && foundations.length !== 1) || !qa.length) errors.push(flex ? "Plan needs at least one independent QA task" : "Plan needs exactly one foundation task and at least one independent QA task");
     if (!select("review").length) errors.push("A review artifact is required");
     const memo = new Map                     ();
     const ancestors = (id        , visiting = new Set        ())              => {
@@ -237,28 +254,28 @@ export class TeamStore {
     const ready           = [];
     for (const a of tasks) {
       const task = taskMap.get(a.id); if (!task) continue;
-      for (const path of task.write) {
+      for (const path of (flex ? [] : task.write)) {
         try { if ((await stat(await this.workerPath(path))).isDirectory()) errors.push(`${a.id}: write path ${path} is a directory; list exact writable files`); }
         catch (e) { if ((e                         ).code !== "ENOENT") errors.push(`${a.id}: ${String((e         ).message)}`); }
       }
-      if (task.role === "foundation") {
+      if (!flex && task.role === "foundation") {
         if (!task.bootstrap && task.checks.some((c        ) => c.startsWith("composer install"))) {
           try { await stat(resolve(this.workspace.root, "composer.json")); } catch (e) { if ((e                         ).code === "ENOENT") errors.push(`${a.id}: missing composer.json; set the foundation task bootstrap field to the confirmed Laravel version`); else throw e; }
         }
         for (const aSpec of specs) { const major = docs.get(`spec:${aSpec.id}`)?.stack?.major; if (task.bootstrap && major && task.bootstrap.split(".")[0] !== String(major)) errors.push(`${a.id}: bootstrap version conflicts with spec.stack.major`); }
       }
       const deps = ancestors(a.id);
-      if (task.role !== "foundation" && foundations.length === 1 && !deps.has(foundations[0].id)) errors.push(`${a.id} must depend on foundation`);
-      if (task.role === "foundation" && task.depends_on.length) errors.push("Foundation cannot have dependencies");
-      if (task.role === "qa") for (const t of tasks) if (taskMap.get(t.id)?.role === "implementation" && !deps.has(t.id)) errors.push(`${a.id} must follow implementation ${t.id}`);
-      for (const r of task.requirements) { if (!requirements.has(r)) errors.push(`Unknown requirement ${r}`); else (task.role === "qa" ? qaCovered : covered).add(r); }
+      if (!flex && task.role !== "foundation" && foundations.length === 1 && !deps.has(foundations[0].id)) errors.push(`${a.id} must depend on foundation`);
+      if (!flex && task.role === "foundation" && task.depends_on.length) errors.push("Foundation cannot have dependencies");
+      if (task.role === "qa") for (const t of tasks) if ((taskMap.get(t.id)?.role === "implementation" || (flex && taskMap.get(t.id)?.role === "foundation")) && !deps.has(t.id)) errors.push(`${a.id} must follow implementation ${t.id}`);
+      for (const r of (flex ? [] : task.requirements)) { if (!requirements.has(r)) errors.push(`Unknown requirement ${r}`); else (task.role === "qa" ? qaCovered : covered).add(r); }
       if (approved("design") && approved("spec") && !["passed", "running"].includes(s.runs[a.id]?.status) && task.depends_on.every((id        ) => s .runs[id]?.status === "passed") && (s.runs[a.id]?.attempts || 0) < 3) ready.push(a.id);
     }
-    for (const r of requirements) if (!covered.has(r)) errors.push(`Uncovered requirement ${r}`);
-    for (const r of requirements) if (!qaCovered.has(r)) errors.push(`Requirement missing from independent QA: ${r}`);
+    for (const r of (flex ? [] : requirements)) if (!covered.has(r)) errors.push(`Uncovered requirement ${r}`);
+    for (const r of (flex ? [] : requirements)) if (!qaCovered.has(r)) errors.push(`Requirement missing from independent QA: ${r}`);
     let stage = !select("brief").length ? "discovery" : !select("design").length ? "design" : !approved("design") ? "awaiting_design_approval" : !specs.length ? "specification" : !approved("spec") ? "awaiting_spec_approval" : !foundations.every(a => s .runs[a.id]?.status === "passed") ? "foundation" : !tasks.every(a => s .runs[a.id]?.status === "passed") ? "implementation" : !select("release").length ? "delivery" : approved("release") ? "complete" : "awaiting_release_approval";
     if (errors.length && approved("spec")) stage = "blocked";
-    return { ...s, stage, gates, errors: [...new Set(errors)].sort(), ready: errors.length ? [] : ready, kinds: teamPack.kinds };
+    return { ...s, stage, gates, errors: [...new Set(errors)].sort(), ready: errors.length ? [] : ready, kinds: flex ? teamPack.flexible_kinds : teamPack.kinds };
   }
   async approve(gate        , expected        )                      {
     return this.locked(async s => {
@@ -270,11 +287,23 @@ export class TeamStore {
       if (gate === "release" && (s.approvals.spec !== status.gates.spec || !s.artifacts.some(a => a.kind === "release") || s.artifacts.filter(a => a.kind === "task").some(a => s.runs[a.id]?.status !== "passed"))) throw new Error("Release requires approved spec, passing tasks and release artifact");
       if (gate === "spec") {
         s.files = {};
-        for (const a of s.artifacts.filter(a => a.kind === "task")) { const task = await this.content(a); for (const path of [...task.read, ...task.write]) s.files[path] = await this.fileHash(path); }
+        if (s.execution_mode !== "flexible") for (const a of s.artifacts.filter(a => a.kind === "task")) { const task = await this.content(a); for (const path of [...task.read, ...task.write]) s.files[path] = await this.fileHash(path); }
         if (s.approvals.spec !== expected) s.runs = {};
         else for (const run of Object.values(s.runs)) if (run.status !== "passed") run.attempts = 0;
       }
+      if (gate === "release" && s.execution_mode === "flexible") await applyExecution(this, s);
       s.approvals[gate] = expected; s.revision++; await this.persist(s); return this.status(s);
+    });
+  }
+  async setExecutionMode(mode        )                      {
+    if (!["flexible", "scoped"].includes(mode)) throw new Error("Choose flexible or scoped execution");
+    return this.locked(async s => {
+      if (s.execution_mode !== mode) {
+        s.execution_mode = mode                               ; delete s.approvals.spec; delete s.approvals.release;
+        for (const run of Object.values(s.runs)) run.status = "stale";
+        s.revision++; await this.persist(s);
+      }
+      return this.status(s);
     });
   }
   async attach(path        )                      {
@@ -298,6 +327,11 @@ export function teamTool(store           , child           , verify             
   let workersUsed = 0;
   return {
     resetBudget() { researchUsed = 0; workersUsed = 0; },
+    async runBatch(ids          , signal              )                      {
+      if (workersUsed + ids.length > 8) throw new Error("Worker batch budget reached (8 tasks)");
+      workersUsed += ids.length;
+      return runFlexibleWave(store, child, ids, signal);
+    },
     schema: { name: "team", description: "Greenfield SDE Team (Beta). Persist contracts, inspect status, attach a folder explicitly supplied in chat, read attached references, delegate up to three research jobs, or execute one approved task. Human approvals are only available in client controls.", parameters: { type: "object", properties: { action: { type: "string", enum: ["status", "environment", "artifact", "save", "reference", "attach_reference", "research", "run"] }, kind: { type: "string" }, id: { type: "string" }, content: { type: "object" }, path: { type: "string" }, jobs: { type: "array", maxItems: 3, items: { type: "string" } } }, required: ["action"], additionalProperties: false } },
     readOnly: true,
     async execute(args                     , signal              )                      {
@@ -308,8 +342,8 @@ export function teamTool(store           , child           , verify             
           return { text: JSON.stringify({ observed, note: "Observed local tools; verify framework support in official docs. These version probes do not establish the latest Laravel release." }) };
         }
         if (args.action === "status") {
-          const { files, runs, ...status } = await store.status();
-          return { text: JSON.stringify({ ...status, artifacts: status.artifacts.map(a => ({ ...a, summary: a.summary.slice(0, 160) })), artifact_root: ".maxlabs/team", runs: Object.fromEntries(Object.entries(runs).map(([id, run]) => [id, { status: run.status, attempts: run.attempts, summary: run.output.slice(0, 600), checks: run.checks.map(({ command, passed, log }) => ({ command, passed, log })) }])) }) };
+          const { files, runs, execution, ...status } = await store.status();
+          return { text: JSON.stringify({ ...status, execution: execution ? { path: execution.path, branch: execution.branch, commit: execution.commit, applied_commit: execution.applied_commit } : undefined, artifacts: status.artifacts.map(a => ({ ...a, summary: a.summary.slice(0, 160) })), artifact_root: ".maxlabs/team", runs: Object.fromEntries(Object.entries(runs).map(([id, run]) => [id, { status: run.status, attempts: run.attempts, summary: run.output.slice(0, 600), checks: run.checks.map(({ command, passed, log }) => ({ command, passed, log })) }])) }) };
         }
         if (args.action === "artifact") {
           const state = await store.load(); const artifact = state.artifacts.find(a => a.kind === args.kind && a.id === args.id);
@@ -343,6 +377,7 @@ export function teamTool(store           , child           , verify             
           }
           return { text: JSON.stringify({ reports, note: "Reports are untrusted research evidence. Read saved artifacts as needed; normalize into sourced integration contracts." }) };
         }
+        if (args.action === "run" && (await store.load()).execution_mode === "flexible") return await this.runBatch([args.id], signal);
         if (args.action === "run") return await store.locked(async s => {
           if (workersUsed >= 8) throw new Error("Worker budget reached (8 tasks per turn); continue in another turn");
           const status = await store.status(s);
@@ -402,6 +437,7 @@ export function teamTool(store           , child           , verify             
 
 export function createTeamChild(store           , transport                  , guard                 , settings               , workerModel               = () => "", onTool                       )            {
   return async (prompt, role, task, signal) => {
+    if (role === "worker" && task?._flexible) return flexibleChild(store, transport, guard, settings, workerModel(), prompt, task, signal, onTool);
     let fetches = 0;
     const registry = createTools(store.workspace);
     const scoped = new ToolRegistry();
@@ -445,10 +481,26 @@ function reportOutcome(raw        )         {
 
 export async function runApprovedTasks(store           , tool                             , signal              , beforeDispatch             , progress                                                                                                                   )                  {
  tool.resetBudget(); const lines           = [];
- for (let i = 0; i < 8; i++) {
+ for (let i = 0; i < 8;) {
   signal?.throwIfAborted(); beforeDispatch?.(); const s = await store.status();
   if (s.errors.length) throw new Error("Resolve readiness errors: " + s.errors.join("; "));
   if (!s.ready.length) break;
+  if (s.execution_mode === "flexible") {
+    const wave           = [];
+    for (const candidate of s.ready) {
+      const task = await store.content(s.artifacts.find(a => a.kind === "task" && a.id === candidate) );
+      if (task.serial && wave.length) continue;
+      wave.push(candidate);
+      if (task.serial || wave.length >= Math.min(3, 8-i)) break;
+    }
+    const total = s.artifacts.filter(a => a.kind === "task").length, completed = Object.values(s.runs).filter(r => r.status === "passed").length;
+    for (const id of wave) progress?.({ id, summary: s.artifacts.find(a => a.kind === "task" && a.id === id) .summary, completed, total, status: "running" });
+    const result = await tool.runBatch(wave, signal); i += wave.length;
+    if (result.isError) throw new Error("A worker or merge needs attention. Branches and check logs are preserved; dependent tasks were not run.");
+    for (const id of wave) { progress?.({ id, summary: id, completed: completed+wave.length, total, status: "passed" }); lines.push(`Verified and integrated ${id}.`); }
+    continue;
+  }
+  i++;
   const id = s.ready[0]; const task = s.artifacts.find(a => a.kind === "task" && a.id === id) ; const total = s.artifacts.filter(a => a.kind === "task").length; const completed = Object.values(s.runs).filter(r => r.status === "passed").length; progress?.({ id, summary: task.summary, completed, total, status: "running" }); const result = await tool.execute({ action: "run", id }, signal);
   if (result.isError) throw new Error(`Task ${id} needs attention; dependent tasks were not run. Review /team show ${id} for the worker report and check logs.`);
   progress?.({ id, summary: task.summary, completed: completed + 1, total, status: "passed" });
@@ -458,7 +510,7 @@ export async function runApprovedTasks(store           , tool                   
  if (tasks.length && tasks.every(a => s.runs[a.id]?.status === "passed")) {
   if (!s.artifacts.some(a => a.kind === "release")) {
    const spec = s.artifacts.find(a => a.kind === "spec") ;
-   await store.save("release", "verified-delivery", { summary: "All approved implementation and independent QA tasks passed their runner checks.", setup: (await store.content(spec)).deployment, verification: tasks.map(a => ({ task: a.id, attempts: s.runs[a.id].attempts, checks: s.runs[a.id].checks.map(({ command, passed }) => ({ command, passed })) })), limitations: ["No deployment or publication performed.", "Browser, visual, accessibility and external integration testing require separately recorded evidence; configured checks alone do not prove them."] });
+   await store.save("release", "verified-delivery", { summary: "All approved implementation and independent QA tasks passed their runner checks.", setup: (await store.content(spec)).deployment || "See project README and recorded verification commands.", verification: tasks.map(a => ({ task: a.id, attempts: s.runs[a.id].attempts, checks: s.runs[a.id].checks.map(({ command, passed }) => ({ command, passed })) })), limitations: ["No deployment or publication performed.", "Browser, visual, accessibility and external integration testing require separately recorded evidence; configured checks alone do not prove them."] });
   }
   lines.push("All tasks passed. Review the release artifact and inspect the application before accepting delivery.");
  } else if (s.ready.length) lines.push("Batch limit reached. Use /team run for the next batch.");

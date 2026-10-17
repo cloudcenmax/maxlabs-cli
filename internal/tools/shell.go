@@ -30,9 +30,10 @@ const (
 // bounded deterministically, so the same command produces the same bytes and
 // cannot perturb the cached prefix of a later step.
 type BashTool struct {
-	ws      *Workspace
-	shell   string
-	timeout time.Duration
+	environment []string
+	ws          *Workspace
+	shell       string
+	timeout     time.Duration
 }
 
 // NewBashTool returns a shell tool bound to a workspace.
@@ -98,6 +99,9 @@ func (t *BashTool) Execute(ctx context.Context, raw json.RawMessage) (Result, er
 	}
 	cmd := exec.CommandContext(runCtx, t.shell, shellArgs...)
 	cmd.Dir = t.ws.Root()
+	if t.environment != nil {
+		cmd.Env = t.environment
+	}
 
 	var combined bytes.Buffer
 	cmd.Stdout = &combined
@@ -147,4 +151,10 @@ func (t *BashTool) Execute(ctx context.Context, raw json.RawMessage) (Result, er
 		Omitted: omitted,
 		IsError: exitCode != 0,
 	}, nil
+}
+
+// WithEnvironment supplies a caller-owned environment without changing ordinary shell behavior.
+func (t *BashTool) WithEnvironment(env []string) *BashTool {
+	t.environment = append([]string{}, env...)
+	return t
 }

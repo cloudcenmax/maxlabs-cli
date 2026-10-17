@@ -436,80 +436,64 @@ clean text.
 
 ## Greenfield SDE Team (Beta)
 
-A Laravel workflow for taking an idea through discovery, a design prototype,
-reviewed specifications, a working foundation, implementation, independent QA,
-and release acceptance. Start it with `maxlabs --team`, or enter `/team` in an
-interactive session. Describe the app, answer the planner's questions, and review
-its artifacts before approving implementation.
+A stack-agnostic workflow for refining an idea, approving a design and plan,
+building small behavior slices, independently verifying them, and accepting the
+release. Start with `maxlabs --team` or `/team` in an interactive session.
 
 ```text
-/team status                 show progress and the next action
-/team status --json          inspect full workflow state
-/team run                    resume a batch of approved tasks without planner calls
-/team show                   review the brief, specification, task scopes and checks
-/team show application       read one contract (--json for machine-readable output)
-/team preview                open the interactive design in your system browser
-/team reference ../admin     attach a directory as a read-only design reference
-/team approve design         accept the current design and continue planning
-/team approve spec           authorize the listed changes/checks and start workers
-/team approve release        accept delivery after every task and QA passes
-/team model worker           select an enabled implementation model
-/team off                    leave the workflow without deleting its state
+/team status                 progress, next action, and latest worker token totals
+/team show [ID]              readable outcomes and execution evidence (--json optional)
+/team preview                open the design in your system browser
+/team reference ../admin     attach a read-only design reference
+/team approve design         accept the design and continue planning
+/team approve spec           approve outcomes and start the worker batch
+/team run                    continue approved tasks without coordinator inference
+/team workspace              combined build folder and Git branch
+/team approve release        apply verified source after drift checks
+/team model ID               choose an enabled worker model
+/team mode flexible          migrate an older project; plan reapproval required
+/team mode scoped            retain legacy Laravel file/command contracts
+/team off                    leave the workflow, preserving its state
 ```
 
-Design inspiration is optional. Share a literal folder path in chat and the planner
-can attach it without a separate setup step; researchers cannot attach folders.
-`/team reference PATH` remains available as a manual shortcut. The CLI preview
-uses an isolated loopback server for this session, serves only the saved design,
-and blocks network/file access with a sandbox policy. If the OS cannot open a
-browser, the CLI prints the working URL. Keep the CLI session open while viewing it.
+Design inspiration is optional: share a literal folder path or public URL during
+discovery. The CLI uses your real browser; it does not create inline preview
+panels. Its design preview is served by an isolated loopback server while the
+session remains open. The normal model selects the planner; the worker model can
+be smaller. Research uses the planner model and preserves sourced API evidence
+for reuse instead of repeatedly loading raw documentation.
 
-The normal `/model` selects the planner. `--worker-model ID` or `/team model ID`
-selects workers independently; researchers use the planner model. An omitted
-worker model inherits the planner. Normal Chat/Act, Plan, and Auto remain
-available. Leaving this workflow preserves artifacts; `/team` resumes it.
+New projects use flexible workers. Task briefs describe observable outcomes and
+`depends_on` task IDs; file paths and checks are suggestions. Workers can inspect,
+scaffold, install dependencies, choose files and commands, and repair failures.
+The dispatcher runs up to three independent tasks concurrently on their own Git
+branches/worktrees, merges passing branches serially into a combined build, and
+then runs independent QA against that result. Use `serial: true` for tasks that
+must run alone. Merge failures preserve branches and stop the next wave.
 
-State is project-local at `.maxlabs/team/state.json`, with versioned JSON
-contracts under `artifacts/`. JSON is the beta's canonical YAML-1.2-compatible
-format. The desktop app reads the same format, so it can continue the same
-project. `greenfield/pack.json` defines the shared contract and Laravel guidance;
-`greenfield/README.md` describes execution and boundaries.
+Source snapshots exclude local secrets and dependency trees. Workers record real
+verification through `verify`; a completion report alone cannot pass. QA runs its
+own checks, and source changes during QA block delivery. Release acceptance checks
+for unreviewed build changes and conflicting edits in the original project before
+applying source. Dependency installation and local environment setup may be needed
+in the combined build and destination; follow the release instructions. Git
+branches isolate edits, **not OS processes**. High-impact actions retain ordinary
+permission controls, and deployment/publication requires separate authorization.
 
-Design and spec approvals bind to artifact hashes. Changing planning contracts
-invalidates relevant approvals. A spec must cover every acceptance requirement,
-have a foundation task, an acyclic dependency graph, independent read-only QA,
-and no unresolved questions or review blockers. Files used by tasks are
-fingerprinted at approval; unexpected changes require review and reapproval.
+CLI and desktop share `.maxlabs/team/` JSON artifacts (YAML 1.2 compatible),
+approvals, branches, immutable run reports and command logs. Existing projects
+without an execution mode stay scoped until a human switches them. Mode changes
+invalidate spec/release approval. Reapproval resets failed attempt budgets;
+changing an approved artifact requires fresh review. Research allows six jobs per
+turn, three concurrently; workers allow eight tasks per batch, three attempts per
+task and forty steps per child. Split large releases into at most sixty-four tasks.
 
-Research can run three agents concurrently, up to six per turn. Public reference
-fetches are permitted in this workflow and stored as evidence snapshots with
-URLs, retrieval times, and hashes. Research reports and normalized integration
-contracts are reusable; snapshots are evidence, not proof of live API behavior.
-Workers run sequentially, up to eight tasks per turn and three attempts per task.
-Each child is capped at forty steps. Release scope is limited to sixty-four tasks
-and 128 artifacts. Continue in another turn when a turn budget is reached.
-
-Workers cannot use a shell, delegate, edit workflow state, or write outside their
-exact approved file list. Approved checks execute through the runner, which owns
-pass/fail status. Those commands run with ordinary workspace permissions; file
-scopes are tool-level boundaries, not OS process isolation. Existing permission
-prompts still govern the initial Composer bootstrap. A foundation task may
-bootstrap a confirmed Laravel major into an empty workspace, then install
-dependencies and run checks listed in its approved contract.
-
-Prototype HTML is self-contained; desktop previews run in a sandboxed iframe
-with network requests disabled. Browser, visual, and accessibility checks require
-corresponding project tooling and approved check scripts. The beta does not
-promise hallucination-free generation or automatic production deployment.
-
-Approved task dispatch follows the DAG deterministically, with no coordinator
-inference between workers. It stops at the first failure; a worker's completion
-claim alone cannot advance the plan. A malformed completion report gets at most
-one tool-free formatting request. Retries receive the previous failure summary
-and check logs. Model-visible tool output is bounded to 16 KB; complete check
-logs and immutable attempt reports remain under `.maxlabs/team/checks/` and
-`runs/`. A successful batch creates the release handoff for review. The desktop
-provides matching resume and spec-reapproval controls.
+Provider-reported worker tokens are saved per attempt and shown in task details.
+Latest-attempt totals exclude previous attempts and planner/research calls; use
+the live metering relay described in `greenfield/README.md` for whole-team cost
+measurement. Browser/visual/accessibility claims require corresponding evidence.
+The workflow reduces unsupported assumptions through review and tests; it cannot
+guarantee hallucination-free code.
 
 The recorded personal-task-manager acceptance run is in
 [`greenfield/e2e/personal-task-manager.json`](greenfield/e2e/personal-task-manager.json).

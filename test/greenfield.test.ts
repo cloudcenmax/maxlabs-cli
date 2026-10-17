@@ -9,6 +9,7 @@ import { PermissionGuard } from "../src/permission.ts";
 const fixtures = JSON.parse(await readFile(new URL("../greenfield/fixtures.json", import.meta.url), "utf8"));
 async function seeded() {
  const root = await mkdtemp(join(tmpdir(), "maxlabs-team-")); const store = new TeamStore(await Workspace.open(root));
+ await store.setExecutionMode("scoped");
  for (const f of fixtures) await store.save(f.kind, f.id, f.content);
  return { store, root };
 }

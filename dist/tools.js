@@ -79,7 +79,7 @@ const objectSchema = (properties                         , required           = 
   type: "object", properties, required, additionalProperties: false,
 });
 
-export function createTools(workspace           )               {
+export function createTools(workspace           , options                                      = {})               {
   const registry = new ToolRegistry();
 
   registry.register({
@@ -181,7 +181,7 @@ export function createTools(workspace           )               {
       try {
         const command = requiredString(args.command, "command");
         const timeout = clampInt(args.timeout_ms, 60_000, 1, 600_000);
-        return await runShell(command, workspace.root, timeout, signal);
+        return await runShell(command, workspace.root, timeout, signal, options.environment);
       } catch (error) { return failure("bash", error); }
     },
   });
@@ -244,11 +244,11 @@ function failure(prefix        , error         )             {
   return { text: `${prefix}: ${error instanceof Error ? error.message : String(error)}`, isError: true };
 }
 
-async function runShell(command        , cwd        , timeout        , signal              )                      {
+async function runShell(command        , cwd        , timeout        , signal              , environment                    )                      {
   const shell = process.platform === "win32" ? process.env.ComSpec || "cmd.exe" : "/bin/sh";
   const args = process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-c", command];
   return new Promise((resolvePromise) => {
-    const child = spawn(shell, args, { cwd, env: process.env, signal });
+    const child = spawn(shell, args, { cwd, env: environment || process.env, signal });
     const chunks           = [];
     let size = 0;
     let timedOut = false;

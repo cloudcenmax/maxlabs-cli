@@ -32,6 +32,44 @@ func (r *Runtime) RunApproved(ctx context.Context) (string, int, error) {
 		if len(status.Ready) == 0 {
 			break
 		}
+		if status.ExecutionMode == "flexible" {
+			ids := []string{}
+			for _, candidate := range status.Ready {
+				serial := false
+				for _, a := range status.Artifacts {
+					if a.Kind == "task" && a.ID == candidate {
+						d, e := r.Store.Content(a)
+						if e != nil {
+							return "", count, e
+						}
+						serial, _ = d["serial"].(bool)
+					}
+				}
+				if serial && len(ids) > 0 {
+					continue
+				}
+				ids = append(ids, candidate)
+				if serial || len(ids) >= 3 || len(ids) >= 8-count {
+					break
+				}
+			}
+			result, err := r.runFlexibleWave(ctx, ids)
+			count += len(ids)
+			if err != nil {
+				return "", count, err
+			}
+			if r.OnTool != nil {
+				raw, _ := json.Marshal(map[string]any{"action": "run", "ids": ids})
+				r.OnTool(session.ToolCall(fmt.Sprintf("dispatch-%d", count), "team", raw), result)
+			}
+			if result.IsError {
+				return "", count, fmt.Errorf("parallel wave needs attention; branches and evidence preserved. %s", resultText(result))
+			}
+			for _, id := range ids {
+				lines = append(lines, "Verified and integrated "+id+".")
+			}
+			continue
+		}
 		id := status.Ready[0]
 		raw, _ := json.Marshal(map[string]string{"action": "run", "id": id})
 		result, err := r.Execute(ctx, raw)
@@ -60,7 +98,9 @@ func (r *Runtime) RunApproved(ctx context.Context) (string, int, error) {
 		}
 		if a.Kind == "spec" {
 			if content, e := r.Store.Content(a); e == nil {
-				setup = content["deployment"]
+				if value := content["deployment"]; value != nil {
+					setup = value
+				}
 			}
 		}
 		if a.Kind == "task" {

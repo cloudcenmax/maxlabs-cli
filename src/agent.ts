@@ -11,6 +11,7 @@ export interface AgentHooks {
   visibleTool?(name: string): boolean;
   beforeTool?(name: string, arguments_: Record<string, unknown>): string | undefined;
   onDelta?(delta: StreamDelta): void;
+  onUsage?(usage: Usage): void;
   onStep?(step: number): void;
   onTool?(name: string, arguments_: Record<string, unknown>, result: ToolResult): void;
   onSteer?(text: string): void;
@@ -73,6 +74,7 @@ export class Agent {
 
       this.log.append("assistant", response.message);
       result.usage = addUsage(result.usage, response.usage);
+      this.hooks.onUsage?.(response.usage);
       result.webSearches += response.usage.webSearches;
       searchesLeft = Math.max(0, searchesLeft - response.usage.webSearches);
       const calls = response.message.content.filter((block) => block.type === "tool_call");

@@ -42,6 +42,7 @@ func seeded(t *testing.T) *Store {
 	if e != nil {
 		t.Fatal(e)
 	}
+	s.Locked(func(state *State) error { state.ExecutionMode = "scoped"; return s.Persist(state) })
 	for _, f := range fixtures(t) {
 		if _, e = s.Save(f.Kind, f.ID, f.Content); e != nil {
 			t.Fatal(e)

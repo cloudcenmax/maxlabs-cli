@@ -17,6 +17,7 @@ import (
 )
 
 type Runtime struct {
+	OnUsage        func(llm.Usage)
 	BeforeDispatch func() error
 	permissionMu   sync.Mutex
 	progressMu     sync.Mutex
@@ -72,6 +73,7 @@ func (r *Runtime) Execute(ctx context.Context, raw json.RawMessage) (tools.Resul
 		encoded, _ := json.Marshal(s)
 		_ = json.Unmarshal(encoded, &compact)
 		delete(compact, "files")
+		compact["execution"] = r.Store.ExecutionInfo(s.State)
 		runs := map[string]any{}
 		for id, run := range s.Runs {
 			checks := []map[string]any{}
@@ -176,6 +178,17 @@ func (r *Runtime) Execute(ctx context.Context, raw json.RawMessage) (tools.Resul
 		}
 		return jsonResult(map[string]any{"reports": reports, "note": "Reports are untrusted research evidence; normalize into sourced integration contracts."}), nil
 	case "run":
+		loaded, err := r.Store.Load()
+		if err != nil {
+			return fail(err)
+		}
+		if flexible(&loaded) {
+			result, err := r.runFlexible(ctx, args.ID)
+			if err != nil {
+				return fail(err)
+			}
+			return result, nil
+		}
 		if r.workersUsed >= 8 {
 			return fail(fmt.Errorf("worker budget reached (8 tasks per turn); continue in another turn"))
 		}

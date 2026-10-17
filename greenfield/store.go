@@ -30,22 +30,30 @@ type Check struct {
 	Output  string `json:"output"`
 }
 type Run struct {
-	ID        string  `json:"id,omitempty"`
-	Archive   string  `json:"archive,omitempty"`
-	Status    string  `json:"status"`
-	Attempts  int     `json:"attempts"`
-	Output    string  `json:"output"`
-	Checks    []Check `json:"checks"`
-	Bootstrap *Check  `json:"bootstrap,omitempty"`
+	Usage      *RunUsage `json:"usage,omitempty"`
+	DurationMS int64     `json:"duration_ms,omitempty"`
+	Branch     string    `json:"branch,omitempty"`
+	Workspace  string    `json:"workspace,omitempty"`
+	Commit     string    `json:"commit,omitempty"`
+	Merged     bool      `json:"merged,omitempty"`
+	ID         string    `json:"id,omitempty"`
+	Archive    string    `json:"archive,omitempty"`
+	Status     string    `json:"status"`
+	Attempts   int       `json:"attempts"`
+	Output     string    `json:"output"`
+	Checks     []Check   `json:"checks"`
+	Bootstrap  *Check    `json:"bootstrap,omitempty"`
 }
 type State struct {
-	Files         map[string]string `json:"files"`
-	SchemaVersion int               `json:"schema_version"`
-	Revision      int               `json:"revision"`
-	Artifacts     []Artifact        `json:"artifacts"`
-	Approvals     map[string]string `json:"approvals"`
-	Runs          map[string]*Run   `json:"runs"`
-	References    map[string]string `json:"references"`
+	Files         map[string]string   `json:"files"`
+	ExecutionMode string              `json:"execution_mode"`
+	Execution     *ExecutionWorkspace `json:"execution,omitempty"`
+	SchemaVersion int                 `json:"schema_version"`
+	Revision      int                 `json:"revision"`
+	Artifacts     []Artifact          `json:"artifacts"`
+	Approvals     map[string]string   `json:"approvals"`
+	Runs          map[string]*Run     `json:"runs"`
+	References    map[string]string   `json:"references"`
 }
 type Status struct {
 	State
@@ -109,7 +117,7 @@ func (s *Store) Path(path string) (string, error) {
 	return SafePath(s.Root, filepath.Join(".maxlabs", "team", path))
 }
 func emptyState() State {
-	return State{SchemaVersion: 1, Artifacts: []Artifact{}, Approvals: map[string]string{}, Runs: map[string]*Run{}, References: map[string]string{}, Files: map[string]string{}}
+	return State{ExecutionMode: "flexible", SchemaVersion: 1, Artifacts: []Artifact{}, Approvals: map[string]string{}, Runs: map[string]*Run{}, References: map[string]string{}, Files: map[string]string{}}
 }
 func (s *Store) Load() (State, error) {
 	p, err := s.Path("state.json")
@@ -129,6 +137,9 @@ func (s *Store) Load() (State, error) {
 	}
 	if state.SchemaVersion != 1 || state.Artifacts == nil || state.Approvals == nil || state.Runs == nil || state.References == nil {
 		return State{}, fmt.Errorf("unsupported or invalid team state")
+	}
+	if state.ExecutionMode == "" {
+		state.ExecutionMode = "scoped"
 	}
 	if state.Files == nil {
 		state.Files = map[string]string{}
@@ -394,7 +405,12 @@ func (s *Store) Save(kind, id string, d map[string]any) (Status, error) {
 		if kind == "task" && taskCount >= 64 {
 			return fmt.Errorf("split release into at most 64 tasks")
 		}
-		if e := validate(kind, id, d); e != nil {
+		if flexible(state) {
+			normalizeBrief(kind, d)
+			if e := validateFlexible(kind, id, d); e != nil {
+				return e
+			}
+		} else if e := validate(kind, id, d); e != nil {
 			return e
 		}
 		state.Revision++
@@ -468,7 +484,11 @@ func (s *Store) Status(state *State) (Status, error) {
 			}
 		}
 	}
+	flex := flexible(state)
 	out := Status{State: *state, Gates: map[string]string{}, Errors: []string{}, Ready: []string{}, Kinds: Contract.Kinds}
+	if flex {
+		out.Kinds = Contract.FlexibleKinds
+	}
 	docs := map[string]map[string]any{}
 	byKind := map[string][]Artifact{}
 	for _, a := range state.Artifacts {
@@ -493,7 +513,11 @@ func (s *Store) Status(state *State) (Status, error) {
 			refs = append(refs, k+":"+v)
 		}
 		sort.Strings(refs)
-		out.Gates[gate] = hash([]byte(strings.Join(parts, "\n") + "\nreferences:" + strings.Join(refs, "\n")))
+		suffix := ""
+		if flex && gate != "design" {
+			suffix = "\nexecution:flexible-v1"
+		}
+		out.Gates[gate] = hash([]byte(strings.Join(parts, "\n") + "\nreferences:" + strings.Join(refs, "\n") + suffix))
 	}
 	approved := func(g string) bool { return state.Approvals[g] == out.Gates[g] }
 	requirements := map[string]bool{}
@@ -505,11 +529,11 @@ func (s *Store) Status(state *State) (Status, error) {
 			out.Errors = append(out.Errors, "Spec has unresolved questions")
 		}
 		stack, _ := d["stack"].(map[string]any)
-		if text(stack, "framework") != "laravel" {
+		if !flex && text(stack, "framework") != "laravel" {
 			out.Errors = append(out.Errors, "This beta requires stack.framework: laravel")
 		}
 		for _, key := range []string{"entities", "authorization", "operations", "acceptance"} {
-			if len(list(d, key)) == 0 {
+			if (!flex || key == "acceptance") && len(list(d, key)) == 0 {
 				out.Errors = append(out.Errors, "Spec "+key+" must be defined")
 			}
 		}
@@ -561,8 +585,12 @@ func (s *Store) Status(state *State) (Status, error) {
 			qa = append(qa, a.ID)
 		}
 	}
-	if len(foundations) != 1 || len(qa) == 0 {
-		out.Errors = append(out.Errors, "Plan needs exactly one foundation task and at least one independent QA task")
+	if (!flex && len(foundations) != 1) || len(qa) == 0 {
+		if flex {
+			out.Errors = append(out.Errors, "Plan needs at least one independent QA task")
+		} else {
+			out.Errors = append(out.Errors, "Plan needs exactly one foundation task and at least one independent QA task")
+		}
 	}
 	var ancestors func(string, map[string]bool) map[string]bool
 	memo := map[string]map[string]bool{}
@@ -599,59 +627,64 @@ func (s *Store) Status(state *State) (Status, error) {
 		id := a.ID
 		d := tasks[id]
 		deps := ancestors(id, map[string]bool{})
-		for _, p := range Strings(d, "write") {
-			target, err := SafeWorkerPath(s.Root, p)
-			if err != nil {
-				out.Errors = append(out.Errors, id+": "+err.Error())
-				continue
-			}
-			if info, err := os.Stat(target); err == nil && info.IsDir() {
-				out.Errors = append(out.Errors, id+": write path "+p+" is a directory; list exact writable files")
-			}
-		}
 		role := text(d, "role")
-		if role == "foundation" {
-			version := text(d, "bootstrap")
-			if version == "" {
-				if _, err := os.Stat(filepath.Join(s.Root, "composer.json")); errors.Is(err, os.ErrNotExist) {
-					for _, c := range Strings(d, "checks") {
-						if strings.HasPrefix(c, "composer install") {
-							out.Errors = append(out.Errors, id+": missing composer.json; set the foundation task bootstrap field to the confirmed Laravel version")
-							break
+		if !flex {
+			for _, p := range Strings(d, "write") {
+				target, err := SafeWorkerPath(s.Root, p)
+				if err != nil {
+					out.Errors = append(out.Errors, id+": "+err.Error())
+					continue
+				}
+				if info, err := os.Stat(target); err == nil && info.IsDir() {
+					out.Errors = append(out.Errors, id+": write path "+p+" is a directory; list exact writable files")
+				}
+			}
+			if role == "foundation" {
+				version := text(d, "bootstrap")
+				if version == "" {
+					if _, err := os.Stat(filepath.Join(s.Root, "composer.json")); errors.Is(err, os.ErrNotExist) {
+						for _, c := range Strings(d, "checks") {
+							if strings.HasPrefix(c, "composer install") {
+								out.Errors = append(out.Errors, id+": missing composer.json; set the foundation task bootstrap field to the confirmed Laravel version")
+								break
+							}
+						}
+					}
+				}
+				if version != "" {
+					for _, spec := range byKind["spec"] {
+						stack, _ := docs["spec:"+spec.ID]["stack"].(map[string]any)
+						if major := text(stack, "major"); major != "" && strings.Split(version, ".")[0] != major {
+							out.Errors = append(out.Errors, id+": bootstrap version conflicts with spec.stack.major")
 						}
 					}
 				}
 			}
-			if version != "" {
-				for _, spec := range byKind["spec"] {
-					stack, _ := docs["spec:"+spec.ID]["stack"].(map[string]any)
-					if major := text(stack, "major"); major != "" && strings.Split(version, ".")[0] != major {
-						out.Errors = append(out.Errors, id+": bootstrap version conflicts with spec.stack.major")
-					}
-				}
-			}
+
 		}
-		if role != "foundation" && len(foundations) == 1 && !deps[foundations[0]] {
+		if !flex && role != "foundation" && len(foundations) == 1 && !deps[foundations[0]] {
 			out.Errors = append(out.Errors, id+" must depend on foundation")
 		}
-		if role == "foundation" && len(list(d, "depends_on")) > 0 {
+		if !flex && role == "foundation" && len(list(d, "depends_on")) > 0 {
 			out.Errors = append(out.Errors, "Foundation cannot have dependencies")
 		}
 		if role == "qa" {
 			for other, t := range tasks {
-				if text(t, "role") == "implementation" && !deps[other] {
+				if (text(t, "role") == "implementation" || (flex && text(t, "role") == "foundation")) && !deps[other] {
 					out.Errors = append(out.Errors, id+" must follow implementation "+other)
 				}
 			}
 		}
-		for _, r := range Strings(d, "requirements") {
-			if !requirements[r] {
-				out.Errors = append(out.Errors, "Unknown requirement "+r)
-			} else {
-				if role == "qa" {
-					qaCovered[r] = true
+		if !flex {
+			for _, r := range Strings(d, "requirements") {
+				if !requirements[r] {
+					out.Errors = append(out.Errors, "Unknown requirement "+r)
 				} else {
-					covered[r] = true
+					if role == "qa" {
+						qaCovered[r] = true
+					} else {
+						covered[r] = true
+					}
 				}
 			}
 		}
@@ -662,6 +695,7 @@ func (s *Store) Status(state *State) (Status, error) {
 			}
 		}
 		run := state.Runs[id]
+
 		if approved("design") && approved("spec") && depsPassed && !passed(id) && (run == nil || (run.Status != "running" && run.Attempts < 3)) {
 			out.Ready = append(out.Ready, id)
 		}
@@ -670,6 +704,9 @@ func (s *Store) Status(state *State) (Status, error) {
 		}
 	}
 	for r := range requirements {
+		if flex {
+			continue
+		}
 		if !covered[r] {
 			out.Errors = append(out.Errors, "Uncovered requirement "+r)
 		}
@@ -768,7 +805,7 @@ func (s *Store) Approve(gate, expected string) (Status, error) {
 		if gate == "spec" {
 			state.Files = map[string]string{}
 			for _, a := range state.Artifacts {
-				if a.Kind == "task" {
+				if a.Kind == "task" && !flexible(state) {
 					d, e := s.Content(a)
 					if e != nil {
 						return e
@@ -790,6 +827,11 @@ func (s *Store) Approve(gate, expected string) (Status, error) {
 						run.Attempts = 0
 					}
 				}
+			}
+		}
+		if gate == "release" && flexible(state) {
+			if err := s.ApplyExecution(state); err != nil {
+				return err
 			}
 		}
 		state.Approvals[gate] = expected
