@@ -21,10 +21,10 @@ test('an SSE error after tool fragments never exposes executable calls',async t=
  await assert.rejects(()=>transport.complete({model:'worker',messages:[],tools:[],maxTokens:32,thinking:'default',webSearch:'off',webSearchUses:0}),ServiceError);
 });
 
-for(const code of ['quota_exhausted','authentication_error','context_length_exceeded','invalid_request_error','service_unavailable'])test('SSE service error '+code+' is classified without leaking payload',async t=>{
+for(const code of ['quota_exhausted','authentication_error','context_length_exceeded','invalid_request_error','service_unavailable','rate_limit_exceeded','concurrency_limit_exceeded'])test('SSE service error '+code+' is classified without leaking payload',async t=>{
  t.mock.method(globalThis,'fetch',async()=>new Response('data: '+JSON.stringify({error:{code,message:'private routing identity and trace'}})+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}}));
  const transport=new GatewayTransport({baseUrl:'https://fixture.invalid/v1',sessionId:'test'});
- await assert.rejects(()=>transport.complete({model:'worker',messages:[],tools:[],maxTokens:32,thinking:'default',webSearch:'off',webSearchUses:0}),(error:Error)=>{assert.ok(error instanceof ServiceError);assert.equal(error.retryable,code==='service_unavailable');assert.doesNotMatch(error.message,/private|neither text/);return true;});
+ await assert.rejects(()=>transport.complete({model:'worker',messages:[],tools:[],maxTokens:32,thinking:'default',webSearch:'off',webSearchUses:0}),(error:Error)=>{assert.ok(error instanceof ServiceError);assert.equal(error.retryable,['service_unavailable','rate_limit_exceeded','concurrency_limit_exceeded'].includes(code));assert.doesNotMatch(error.message,/private|neither text/);return true;});
 });
 
 test('buffered SSE completion and trailing data without newline retain tools and usage',async t=>{
@@ -32,6 +32,12 @@ test('buffered SSE completion and trailing data without newline retain tools and
  t.mock.method(globalThis,'fetch',async()=>new Response('data: '+JSON.stringify(payload)+'\n\ndata: {"choices":[],"usage":{"completion_tokens":4}}',{headers:{'content-type':'text/event-stream'}}));
  const transport=new GatewayTransport({baseUrl:'https://fixture.invalid/v1',sessionId:'test'}),result=await transport.complete({model:'worker',messages:[],tools:[],maxTokens:32,thinking:'default',webSearch:'off',webSearchUses:0});
  assert.equal(result.message.content.length,2);assert.equal(result.usage.outputTokens,4);
+});
+
+for(const window of ['weekly','h5','private-routing-detail'])test('quota window details are retained safely: '+window,async t=>{
+ t.mock.method(globalThis,'fetch',async()=>new Response('data: '+JSON.stringify({error:{code:'quota_exhausted',type:'rate_limit_error',window,resets_at:'2026-10-24T04:41:37+00:00',message:'private diagnostic trace'}})+'\n\n',{headers:{'content-type':'text/event-stream'}}));
+ const transport=new GatewayTransport({baseUrl:'https://fixture.invalid/v1',sessionId:'test'});
+ await assert.rejects(()=>transport.complete({model:'worker',messages:[],tools:[],maxTokens:32,thinking:'default',webSearch:'off',webSearchUses:0}),(error:Error)=>{assert.ok(error instanceof ServiceError);assert.equal(error.retryable,false);assert.doesNotMatch(error.message,/private/);if(window!=='private-routing-detail'){assert.equal(error.window,window);assert.equal(error.resetsAt,'2026-10-24T04:41:37.000Z');assert.match(error.message,/allowance cannot cover/);}return true;});
 });
 
 test("usage buckets remain disjoint", () => {
