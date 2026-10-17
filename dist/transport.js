@@ -22,6 +22,20 @@ import { emptyUsage } from "./types.js";
 
 
 
+export class ServiceError extends Error {
+           retryable        ;
+  constructor(message       ,retryable        ){super('MaxLabs: '+message);this.name='ServiceError';this.retryable=retryable;}
+}
+function eventError(payload                       )                        {
+ if(payload.error===undefined||payload.error===null)return;
+ const fields=payload.error                          ,code=String(fields?.code||'')+' '+String(fields?.type||'');
+ if(/quota|rate_limit/i.test(code))return new ServiceError('The request limit has been reached. Check account limits before retrying.',false);
+ if(/auth|api_key|permission|access_denied/i.test(code))return new ServiceError('The request was not authorized. Check your sign-in and model access.',false);
+ if(/context_length|context_window/i.test(code))return new ServiceError('This conversation exceeds the model context limit. Reduce the context before continuing.',false);
+ if(/invalid_request|invalid_argument/i.test(code))return new ServiceError('The service could not accept this request. Review the request before retrying.',false);
+ return new ServiceError('The service could not complete this request. Please retry shortly.',true);
+}
+
 
 
 
@@ -153,19 +167,30 @@ async function consumeStream(response          , onDelta                        
   let usage = emptyUsage();
   const calls = new Map                                                         ();
   let sawFrame = false;
+  let eventName='',buffered                             ;
+  let finished=false;
+  try {
   while (true) {
     const { value, done } = await reader.read();
     buffer += value || "";
+    if(done&&buffer&&!buffer.endsWith('\n'))buffer+='\n';
     const lines = buffer.split(/\r?\n/);
     buffer = lines.pop() || "";
     for (const line of lines) {
+      if(line.startsWith('event:')){eventName=line.slice(6).trim();continue;}
       if (!line.startsWith("data:")) continue;
       const payload = line.slice(5).trim();
-      if (!payload || payload === "[DONE]") continue;
+      if (!payload) continue;
+      if(payload==='[DONE]'){finished=true;break;}
       let chunk                         ;
       try { chunk = JSON.parse(payload)                           ; } catch { continue; }
+      const failure=eventError(eventName==='error'?{error:chunk}:chunk);eventName='';if(failure)throw failure;
       sawFrame = true;
       if (chunk.usage) usage = parseUsage(chunk.usage                           );
+      if((chunk.choices                                 )?.[0]?.message){
+        if(buffered||text||calls.size)throw new ServiceError('The service returned conflicting completion data. Please retry.',true);
+        buffered=parseBuffered(chunk,onDelta);usage=buffered.usage;continue;
+      }
       for (const choice of (chunk.choices                                   || [])) {
         const delta = choice.delta                            || {};
         const reasoning = String(delta.reasoning || delta.reasoning_content || "");
@@ -183,9 +208,11 @@ async function consumeStream(response          , onDelta                        
         }
       }
     }
-    if (done) break;
+    if (done||finished) break;
   }
+  } finally {await reader.cancel().catch(()=>{});reader.releaseLock();}
   if (!sawFrame) throw new Error("Gateway stream contained no usable frames");
+  if(buffered){if(text||calls.size)throw new ServiceError('The service returned conflicting completion data. Please retry.',true);return {...buffered,usage};}
   const blocks          = [];
   if (text) blocks.push({ type: "text", text });
   for (const call of [...calls.entries()].sort(([a], [b]) => a - b).map(([, value]) => value)) {
@@ -198,6 +225,7 @@ async function consumeStream(response          , onDelta                        
 }
 
 function parseBuffered(payload                         , onDelta                               )                     {
+  const failure=eventError(payload);if(failure)throw failure;
   const choice = (payload.choices                                   || [])[0];
   const message = choice?.message                            || {};
   const blocks          = [];

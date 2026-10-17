@@ -1,6 +1,38 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { GatewayTransport, parseUsage } from "../src/transport.ts";
+import { ServiceError } from '../src/transport.ts';
+import { Agent } from '../src/agent.ts';
+import { SessionLog, SteeringQueue } from '../src/session.ts';
+import { ToolRegistry } from '../src/tools.ts';
+import { PermissionGuard } from '../src/permission.ts';
+
+test('agent does not repeat a terminal SSE service failure',async t=>{
+ let requests=0;t.mock.method(globalThis,'fetch',async()=>{requests++;return new Response('data: {"error":{"code":"quota_exhausted"}}\n\n',{headers:{'content-type':'text/event-stream'}});});
+ const transport=new GatewayTransport({baseUrl:'https://fixture.invalid/v1',sessionId:'test'});
+ const agent=new Agent(new SessionLog(),transport,new ToolRegistry(),new PermissionGuard('auto',async()=> 'deny'),{model:'worker',maxSteps:3,maxTokens:32,thinking:'default',webSearch:'off',webSearchUses:0});
+ await assert.rejects(()=>agent.run('continue',new SteeringQueue()),/request limit/);assert.equal(requests,1);
+});
+
+test('an SSE error after tool fragments never exposes executable calls',async t=>{
+ const body='data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"write","arguments":"{}"}}]}}]}\n\ndata: {"error":{"code":"service_unavailable"}}\n\n';
+ t.mock.method(globalThis,'fetch',async()=>new Response(body,{headers:{'content-type':'text/event-stream'}}));
+ const transport=new GatewayTransport({baseUrl:'https://fixture.invalid/v1',sessionId:'test'});
+ await assert.rejects(()=>transport.complete({model:'worker',messages:[],tools:[],maxTokens:32,thinking:'default',webSearch:'off',webSearchUses:0}),ServiceError);
+});
+
+for(const code of ['quota_exhausted','authentication_error','context_length_exceeded','invalid_request_error','service_unavailable'])test('SSE service error '+code+' is classified without leaking payload',async t=>{
+ t.mock.method(globalThis,'fetch',async()=>new Response('data: '+JSON.stringify({error:{code,message:'private routing identity and trace'}})+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}}));
+ const transport=new GatewayTransport({baseUrl:'https://fixture.invalid/v1',sessionId:'test'});
+ await assert.rejects(()=>transport.complete({model:'worker',messages:[],tools:[],maxTokens:32,thinking:'default',webSearch:'off',webSearchUses:0}),(error:Error)=>{assert.ok(error instanceof ServiceError);assert.equal(error.retryable,code==='service_unavailable');assert.doesNotMatch(error.message,/private|neither text/);return true;});
+});
+
+test('buffered SSE completion and trailing data without newline retain tools and usage',async t=>{
+ const payload={choices:[{message:{content:'MaxLabs response',tool_calls:[{id:'c1',function:{name:'read',arguments:'{"path":"README.md"}'}}]},finish_reason:'tool_calls'}],usage:{completion_tokens:3}};
+ t.mock.method(globalThis,'fetch',async()=>new Response('data: '+JSON.stringify(payload)+'\n\ndata: {"choices":[],"usage":{"completion_tokens":4}}',{headers:{'content-type':'text/event-stream'}}));
+ const transport=new GatewayTransport({baseUrl:'https://fixture.invalid/v1',sessionId:'test'}),result=await transport.complete({model:'worker',messages:[],tools:[],maxTokens:32,thinking:'default',webSearch:'off',webSearchUses:0});
+ assert.equal(result.message.content.length,2);assert.equal(result.usage.outputTokens,4);
+});
 
 test("usage buckets remain disjoint", () => {
   const usage = parseUsage({

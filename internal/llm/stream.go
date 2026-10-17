@@ -143,12 +143,14 @@ func (p *HTTPProvider) Stream(ctx context.Context, req wire.Request, onDelta Del
 // consumeStream parses SSE frames and assembles the final response.
 func (p *HTTPProvider) consumeStream(resp *http.Response, onDelta DeltaFunc) (Response, error) {
 	var (
-		text   strings.Builder
-		calls  = map[int]*accumulatingCall{}
-		order  []int
-		finish string
-		usage  map[string]any
-		sawAny bool
+		text      strings.Builder
+		calls     = map[int]*accumulatingCall{}
+		order     []int
+		finish    string
+		usage     map[string]any
+		sawAny    bool
+		buffered  *Response
+		eventName string
 	)
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -159,6 +161,10 @@ func (p *HTTPProvider) consumeStream(resp *http.Response, onDelta DeltaFunc) (Re
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "event:") {
+			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			continue
+		}
 
 		if line == "" || !strings.HasPrefix(line, "data:") {
 			continue
@@ -167,6 +173,37 @@ func (p *HTTPProvider) consumeStream(resp *http.Response, onDelta DeltaFunc) (Re
 		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if payload == "[DONE]" {
 			break
+		}
+		errorPayload := payload
+		if eventName == "error" {
+			errorPayload = `{"error":` + payload + `}`
+		}
+		eventName = ""
+		if err := eventError([]byte(errorPayload)); err != nil {
+			return Response{}, err
+		}
+		// A gateway can emit a buffered completion as one SSE data frame.
+		var envelope struct {
+			Choices []struct {
+				Message json.RawMessage `json:"message"`
+			} `json:"choices"`
+		}
+		if json.Unmarshal([]byte(payload), &envelope) == nil && len(envelope.Choices) > 0 && len(envelope.Choices[0].Message) > 0 && string(envelope.Choices[0].Message) != "null" {
+			if buffered != nil || text.Len() > 0 || len(calls) > 0 {
+				return Response{}, &ServiceError{Code: "invalid_response", Message: "The service returned conflicting completion data. Please retry.", CanRetry: true}
+			}
+			result, err := p.consumeBufferedResponse(strings.NewReader(payload))
+			if err != nil {
+				return Response{}, err
+			}
+			buffered = &result
+			for _, block := range result.Message.Content {
+				if block.Type == session.BlockText && onDelta != nil {
+					onDelta(Delta{Text: block.Text})
+				}
+			}
+			sawAny = true
+			continue
 		}
 
 		var chunk streamChunk
@@ -229,6 +266,15 @@ func (p *HTTPProvider) consumeStream(resp *http.Response, onDelta DeltaFunc) (Re
 
 	if !sawAny {
 		return Response{}, fmt.Errorf("llm: the stream contained no usable frames")
+	}
+	if buffered != nil {
+		if text.Len() > 0 || len(calls) > 0 {
+			return Response{}, &ServiceError{Code: "invalid_response", Message: "The service returned conflicting completion data. Please retry.", CanRetry: true}
+		}
+		if usage != nil {
+			buffered.Usage = ParseUsage(usage)
+		}
+		return *buffered, nil
 	}
 
 	blocks := make([]session.Block, 0, len(order)+1)

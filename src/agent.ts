@@ -129,7 +129,7 @@ export class Agent {
       try { return await operation(); }
       catch (error) {
         lastError = error;
-        if (signal?.aborted || attempt === 3) break;
+        if (signal?.aborted || attempt === 3 || (error instanceof Error && 'retryable' in error && error.retryable === false)) break;
         await new Promise((resolve) => setTimeout(resolve, 400 * (2 ** attempt)));
       }
     }

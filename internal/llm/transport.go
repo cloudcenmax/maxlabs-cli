@@ -119,6 +119,7 @@ func reasoningEffort(level string) *reasoningParam {
 
 // chatResponse is the subset of the completion envelope this harness consumes.
 type chatResponse struct {
+	Error   json.RawMessage `json:"error"`
 	Choices []struct {
 		Message struct {
 			Content   json.RawMessage `json:"content"`
@@ -251,6 +252,11 @@ func (p *HTTPProvider) consumeBufferedResponse(body io.Reader) (Response, error)
 	}
 
 	if len(decoded.Choices) == 0 {
+		if len(decoded.Error) > 0 {
+			if err := eventError([]byte(`{"error":` + string(decoded.Error) + `}`)); err != nil {
+				return Response{}, err
+			}
+		}
 		return Response{}, fmt.Errorf("llm: response contained no choices")
 	}
 

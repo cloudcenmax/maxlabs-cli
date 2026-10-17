@@ -424,6 +424,17 @@ func TestRetriesAreBounded(t *testing.T) {
 	}
 }
 
+func TestTerminalServiceErrorsDoNotRetry(t *testing.T) {
+	provider := &scripted{failures: []error{&llm.ServiceError{Code: "request_limit", Message: "Request limit reached", CanRetry: false}}}
+	a := harness(t, provider, echo{}, 5)
+	if _, err := a.Run(context.Background(), "continue"); err == nil {
+		t.Fatal("expected service failure")
+	}
+	if provider.calls != 1 {
+		t.Fatalf("terminal failure retried %d times", provider.calls)
+	}
+}
+
 // TestStepLimitStopsARunawayLoop converts a model that never stops calling tools
 // from a hung session into a reported error.
 func TestStepLimitStopsARunawayLoop(t *testing.T) {

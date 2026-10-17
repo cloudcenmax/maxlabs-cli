@@ -471,6 +471,10 @@ func (a *Agent) send(ctx context.Context, request wire.Request) (llm.Response, e
 		}
 
 		lastErr = err
+		var classified interface{ Retryable() bool }
+		if errors.As(err, &classified) && !classified.Retryable() {
+			return llm.Response{}, err
+		}
 
 		if ctx.Err() != nil {
 			return llm.Response{}, ctx.Err()
