@@ -190,5 +190,21 @@
   {
     "command": "ls .npmrc 2>/dev/null; cat .npmrc",
     "auto": false
+  },
+  {
+    "command": "test -f .env && php artisan test 2>&1",
+    "auto": true
+  },
+  {
+    "command": "[ -f .env ] && php artisan test 2>&1",
+    "auto": true
+  },
+  {
+    "command": "/bin/ls -la .env 2>/dev/null",
+    "auto": true
+  },
+  {
+    "command": "test -f /etc/.env && cat /etc/.env",
+    "auto": false
   }
 ]

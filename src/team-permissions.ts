@@ -92,7 +92,7 @@ export async function workerAutoCommand(root: string, command: string): Promise<
     if (['&&', '||', ';', '|', '\n'].includes(part[0])) { metadata = false; continue; }
     const previous = parts[index-1];
     const commandStart = !previous || ['&&', '||', ';', '|', '\n'].includes(previous[0]);
-    if (commandStart) metadata = ['ls', 'stat'].includes(word(part[0]));
+    if (commandStart) metadata = ['ls', 'stat', 'test', '[', '/bin/ls', '/usr/bin/ls', '/bin/stat', '/usr/bin/stat', '/bin/test', '/usr/bin/test', '/bin/[', '/usr/bin/['].includes(word(part[0]));
     const value = word(part[0]);
     if (ranges.some(([start,end])=>part.index!>=start && part.index!+part[0].length<=end)) continue;
     if (!commandStart && !value.includes('=') && /(?:^|\/)\.env\.example$/.test(value)) {

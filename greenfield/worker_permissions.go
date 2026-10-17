@@ -208,7 +208,12 @@ func workerAutoCommand(root, command string) (string, bool) {
 		commandStart := i == 0 || previous == "&&" || previous == "||" || previous == ";" || previous == "|" || previous == "\n"
 		if commandStart {
 			name := workerShellWord(raw)
-			metadata = name == "ls" || name == "stat"
+			switch name {
+			case "ls", "stat", "test", "[", "/bin/ls", "/usr/bin/ls", "/bin/stat", "/usr/bin/stat", "/bin/test", "/usr/bin/test", "/bin/[", "/usr/bin/[":
+				metadata = true
+			default:
+				metadata = false
+			}
 		}
 		value := workerShellWord(raw)
 		covered := false
