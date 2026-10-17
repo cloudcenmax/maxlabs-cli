@@ -77,11 +77,59 @@ export class GatewayTransport {
       },
     });
     if (!response.ok) {
-      const excerpt = (await response.text()).slice(0, 4_096).trim();
-      throw new Error(`Gateway returned ${response.status}: ${excerpt}`);
+      throw new Error(await gatewayError(response));
     }
     return response;
   }
+}
+
+async function gatewayError(response          )                  {
+  const reader = response.body?.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let remaining = 4_096;
+  try {
+    while (reader && remaining > 0) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const chunk = value.subarray(0, remaining);
+      text += decoder.decode(chunk, { stream: true });
+      remaining -= chunk.byteLength;
+    }
+    text += decoder.decode();
+  } finally {
+    await reader?.cancel().catch(() => {});
+  }
+  const fallback = response.statusText || ({
+    400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
+    408: "Request Timeout", 413: "Content Too Large", 422: "Unprocessable Content",
+    429: "Too Many Requests", 500: "Internal Server Error", 502: "Bad Gateway",
+    503: "Service Unavailable", 504: "Gateway Timeout",
+  }                          )[response.status] || "Request failed";
+  let detail = fallback;
+  const markup = /<[!/?a-zA-Z][^>]*/;
+  if ((response.headers.get("content-type") || "").toLowerCase().includes("text/html") || markup.test(text)) {
+    detail += ". The gateway returned an HTML error page. Please retry shortly.";
+  } else {
+    try {
+      const envelope = JSON.parse(text);
+      const fields = envelope?.error ?? envelope;
+      if (typeof fields === "string" && fields.trim()) detail = fields;
+      else if (fields && typeof fields === "object") {
+        if (typeof fields.message === "string" && fields.message.trim()) detail = fields.message;
+        for (const key of ["code", "type", "window", "resets_at"]) {
+          if (typeof fields[key] === "string" && fields[key].trim()) detail += `; ${key}=${fields[key]}`;
+        }
+      }
+    } catch {
+      if (text.trim() && !text.trim().startsWith("{") && !text.trim().startsWith("[")) detail = text;
+    }
+  }
+  if (markup.test(detail)) detail = fallback + ". The gateway returned an HTML error page. Please retry shortly.";
+  detail = detail.replace(/\s+/g, " ").trim();
+  const chars = [...detail];
+  if (chars.length > 512) detail = chars.slice(0, 509).join("") + "...";
+  return `Gateway returned ${response.status}: ${detail}`;
 }
 
 function outboundMessage(message         )                          {

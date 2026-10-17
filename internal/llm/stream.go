@@ -118,14 +118,7 @@ func (p *HTTPProvider) Stream(ctx context.Context, req wire.Request, onDelta Del
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		limit := p.MaxErrorBodyBytes
-		if limit <= 0 {
-			limit = defaultMaxErrorBody
-		}
-		excerpt := make([]byte, limit)
-		n, _ := resp.Body.Read(excerpt)
-		return Response{}, fmt.Errorf("llm: upstream returned %d: %s",
-			resp.StatusCode, strings.TrimSpace(string(excerpt[:n])))
+		return Response{}, p.responseError("upstream", resp)
 	}
 
 	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {

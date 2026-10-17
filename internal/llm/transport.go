@@ -234,16 +234,8 @@ func (p *HTTPProvider) Complete(ctx context.Context, req wire.Request) (Response
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	limit := p.MaxErrorBodyBytes
-	if limit <= 0 {
-		limit = defaultMaxErrorBody
-	}
-
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		excerpt, _ := io.ReadAll(io.LimitReader(resp.Body, int64(limit)))
-		// The credential is never echoed: only the provider's own text is kept.
-		return Response{}, fmt.Errorf("llm: upstream returned %d: %s",
-			resp.StatusCode, strings.TrimSpace(string(excerpt)))
+		return Response{}, p.responseError("upstream", resp)
 	}
 
 	return p.consumeBufferedResponse(resp.Body)

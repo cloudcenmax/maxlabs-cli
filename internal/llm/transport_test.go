@@ -502,3 +502,54 @@ func TestTransportSendsTheOutputBudget(t *testing.T) {
 		t.Fatalf("max_tokens = %v, want 4096", captured["max_tokens"])
 	}
 }
+
+// Exercise every shared desktop/worker entry point, including OAuth model
+// discovery, without sending traffic to a real gateway.
+type errorRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f errorRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func TestGatewayErrorsAreConciseAcrossEndpoints(t *testing.T) {
+	cases := []struct {
+		name, contentType, body, want string
+		status                        int
+	}{
+		{"html", "text/html", "<!DOCTYPE html><html><style>secret debug CSS</style></html>", "HTML error page", 500},
+		{"mislabeled html", "application/json", "<html>secret debug CSS</html>", "HTML error page", 502},
+		{"escaped html", "application/json", `{"error":{"message":"\u003chtml>secret debug CSS\u003c/html>"}}`, "HTML error page", 500},
+		{"quota", "application/json", `{"error":{"message":"Quota exhausted","code":"quota_exhausted","window":"weekly","resets_at":"2026-10-20T00:00:00Z"},"trace":"secret debug CSS"}`, "resets_at=2026-10-20T00:00:00Z", 429},
+		{"plain", "text/plain", "Service temporarily unavailable", "Service temporarily unavailable", 503},
+		{"empty", "text/plain", "", "Internal Server Error", 500},
+		{"debug json", "application/json", `{"exception":"secret debug CSS","trace":["private path"]}`, "Internal Server Error", 500},
+		{"long", "text/plain", strings.Repeat("x", 8000), "...", 500},
+	}
+	for _, tc := range cases {
+		for _, endpoint := range []string{"complete", "stream", "models"} {
+			t.Run(tc.name+"/"+endpoint, func(t *testing.T) {
+				p := &llm.HTTPProvider{BaseURL: "https://fixture.invalid/v1", Client: &http.Client{Transport: errorRoundTripper(func(*http.Request) (*http.Response, error) {
+					return &http.Response{StatusCode: tc.status, Header: http.Header{"Content-Type": []string{tc.contentType}}, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+				})}}
+				var err error
+				switch endpoint {
+				case "complete":
+					_, err = p.Complete(context.Background(), sampleRequest())
+				case "stream":
+					_, err = p.Stream(context.Background(), sampleRequest(), nil)
+				case "models":
+					_, err = p.Models(context.Background())
+				}
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("error = %v, want %q", err, tc.want)
+				}
+				if strings.Contains(err.Error(), "secret debug CSS") || strings.Contains(err.Error(), "<html") || len([]rune(err.Error())) > 560 {
+					t.Fatalf("unfiltered error: %v", err)
+				}
+				if tc.name == "quota" && !strings.Contains(err.Error(), "window=weekly") {
+					t.Fatalf("lost quota metadata: %v", err)
+				}
+			})
+		}
+	}
+}

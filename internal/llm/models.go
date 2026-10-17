@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -39,15 +38,7 @@ func (p *HTTPProvider) Models(ctx context.Context) ([]ModelCard, error) {
 	defer func() { _ = response.Body.Close() }()
 
 	if response.StatusCode < 200 || response.StatusCode > 299 {
-		limit := p.MaxErrorBodyBytes
-		if limit <= 0 {
-			limit = defaultMaxErrorBody
-		}
-
-		excerpt, _ := io.ReadAll(io.LimitReader(response.Body, int64(limit)))
-
-		return nil, fmt.Errorf("llm: model list returned %d: %s",
-			response.StatusCode, strings.TrimSpace(string(excerpt)))
+		return nil, p.responseError("model list", response)
 	}
 
 	var payload struct {
