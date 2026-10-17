@@ -45,3 +45,8 @@ test("chat reference attachment requires a literal human-provided folder", async
  const tool = teamTool(store, async () => ({ text: "" }), async () => ({ text: "" }), value => referenceNamed(value, "Use " + path));
  assert.equal((await tool.execute({ action: "attach_reference", path })).isError, undefined); assert.match(await store.reference("reference-1", "theme.css"), /red/);
 });
+
+test("new project status invites discovery without treating unwritten plans as failures", async () => {
+ const store = new TeamStore(await Workspace.open(await mkdtemp(join(tmpdir(), "team-discovery-"))));
+ const text = teamStatusText(await store.status()); assert.match(text,/Shape the idea/); assert.match(text,/Flexible workers/); assert.doesNotMatch(text,/Needs attention|readiness issues|Laravel/);
+});
