@@ -10,6 +10,7 @@ import { SessionLog, SteeringQueue } from "./session.js";
 import { GatewayTransport } from "./transport.js";
 import { createTools, Workspace } from "./tools.js";
 import { TeamStore, runApprovedTasks, environmentCommands, allowedCheck, createTeamChild, teamInstructions, teamTool } from "./greenfield.js";
+import { TeamDirectionReview, teamDirectionPrompt } from "./team-steering.js";
 import { referenceNamed } from "./team-reference.js";
 import { TeamPreview } from "./team-preview.js";
 import { teamStatusText, teamArtifactText, teamNext } from "./team-view.js";
@@ -379,7 +380,7 @@ async function main()                {
     }
   } finally { clearStatus(); router.close(); teamPreview.close(); }
 
-  async function runTurn(text        )                {
+  async function runTurn(text        , preserveTeamBudget = false)                {
     activeAbort = new AbortController();
     router.busy = true;
     streamed = false;
@@ -394,8 +395,7 @@ async function main()                {
     startStatus();
     try {
       childUsage = emptyUsage();
-      workflow.resetBudget();
-      plannerFetches = 0;
+      if (!preserveTeamBudget) { workflow.resetBudget(); plannerFetches = 0; }
       if (!teamMode && agent.log.events().some(e => e.message.content.some(b => b.type === "text" && b.text.includes("[team:instructions:v1]")))) text = "[Greenfield SDE Team is disabled for this turn. Follow ordinary CLI mode and tools.]\n\n" + text;
       if (teamMode) {
         agent.log.ensureSystem(systemPrompt(guard.mode));
@@ -438,9 +438,12 @@ async function main()                {
 
   async function executeApproved()                {
     childUsage = emptyUsage();
+    let directionReview                              ;
     router.busy = true; activeAbort = new AbortController();
-    try { process.stdout.write((await runApprovedTasks(teamStore, workflow, activeAbort.signal, () => { const directions = router.steering.drain(); if (directions.length) { for (const text of directions) agent.log.append("steering", { role: "user", content: [{ type: "text", text }], source: "user" }); throw new Error("Execution stopped before the next task to review the new direction: " + directions.join("\n") + ". Update and review affected contracts before continuing."); } }, event => { clearStatus(); process.stdout.write(`${event.status === "passed" ? ui.success("✓") : ui.brand("→")} ${event.completed}/${event.total} · ${event.summary}\n`); })) + "\n"); }
+    try { process.stdout.write((await runApprovedTasks(teamStore, workflow, activeAbort.signal, () => { const directions = router.steering.drain(); if (directions.length) { for (const text of directions) agent.log.append("steering", { role: "user", content: [{ type: "text", text }], source: "user" }); throw new TeamDirectionReview(directions); } }, event => { clearStatus(); process.stdout.write(`${event.status === "passed" ? ui.success("✓") : ui.brand("→")} ${event.completed}/${event.total} · ${event.summary}\n`); })) + "\n"); }
+    catch(error) { if(error instanceof TeamDirectionReview)directionReview=error;else throw error; }
     finally { clearStatus(); router.busy = false; activeAbort = undefined; process.stdout.write(teamStatusText(await teamStore.status()) + "\n"); const input=childUsage.uncachedInputTokens+childUsage.cacheReadTokens+childUsage.cacheWriteTokens; if(input)process.stdout.write(ui.tone(`[${input.toLocaleString()} input tokens · ${childUsage.outputTokens.toLocaleString()} output tokens · cache hit ${Math.round(childUsage.cacheReadTokens/input*100)}%]`)+"\n"); }
+    if(directionReview)await runTurn(teamDirectionPrompt(directionReview.directions),true);
   }
 
   async function command(text        )                   {
