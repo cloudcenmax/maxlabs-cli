@@ -112,6 +112,10 @@ type Policy struct {
 	// worst an over-eager rule here can produce is a question that did not need
 	// asking.
 	Auto bool
+
+	// ProjectCommand evaluates literal commands against the assigned workspace.
+	// It is supplied by the host so setup, delegates and workers share scope.
+	ProjectCommand func(command string) bool
 }
 
 // DefaultPolicy returns the policy a person-watched session starts with:
@@ -148,15 +152,23 @@ func (p Policy) Decide(req Request) (Effect, string) {
 		// auditor into it too.
 		decision := audit.Assess(req.Tool, req.Arguments, req.Transcript)
 
-		if decision.Allowed() {
-			return Allow, "audited: " + decision.Explain()
-		}
-
 		// A refusal is not a question. Offering it as one gives a person a
 		// choice whose only safe answer is no, and a tired reader eventually
 		// says yes - so the refusal is the control, not the prompt.
 		if decision.RefusedNow() {
 			return Deny, decision.Explain()
+		}
+		if req.Tool == "bash" && p.ProjectCommand != nil {
+			var input struct {
+				Command string `json:"command"`
+			}
+			if json.Unmarshal(req.Arguments, &input) == nil && p.ProjectCommand(input.Command) {
+				return Allow, "audited project command within the assigned workspace"
+			}
+			return Ask, "the command’s scope or effects require review"
+		}
+		if decision.Allowed() {
+			return Allow, "audited: " + decision.Explain()
 		}
 
 		// A risky verdict is not a refusal. It means a person decides, which is
@@ -261,7 +273,7 @@ func (g *Guard) Permit(ctx context.Context, tool string, args json.RawMessage, r
 	// still wins: a session approval given in normal mode must not let a write
 	// through while the user believes they are planning.
 	if !policy.PlanMode {
-		if rememberedAllow && !req.OneTimeOnly {
+		if rememberedAllow && !req.OneTimeOnly && !(policy.Auto && policy.ProjectCommand != nil && tool == "bash") {
 			g.record(Outcome{Effect: Allow, Reason: "approved earlier in this session"})
 			return "", nil
 		}

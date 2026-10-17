@@ -39,10 +39,12 @@ export class PermissionGuard {
            decisions                                                                 = [];
   mode      ;
            prompt                ;
+           projectCommand                                        ;
 
-  constructor(mode      , prompt                ) {
+  constructor(mode      , prompt                , projectCommand                                        ) {
     this.mode = mode;
     this.prompt = prompt;
+    this.projectCommand = projectCommand;
   }
 
   async permit(tool      , arguments_                         )                              {
@@ -52,7 +54,14 @@ export class PermissionGuard {
   }
 
   async #permit(tool      , arguments_                         )                              {
-    const decision = decide(this.mode, tool, arguments_);
+    let decision = decide(this.mode, tool, arguments_);
+    if (this.mode === 'auto' && !tool.readOnly && tool.schema.name === 'bash' && this.projectCommand) {
+      if (await this.projectCommand(String(arguments_.command || ''))) {
+        this.decisions.push({effect:'allow', reason:'audited project command within the assigned workspace', oneTimeOnly:false, scope:decision.scope, tool:'bash', granted:true});
+        return;
+      }
+      decision={...decision,effect:'ask',reason:freshApprovalRisk('bash',arguments_)||'the command’s scope or effects require review',oneTimeOnly:true};
+    }
     if (decision.effect === "allow") {
       this.decisions.push({ ...decision, tool: tool.schema.name, granted: true });
       return undefined;
@@ -113,8 +122,10 @@ export function isReadOnlyCommand(command        )          {
   if (!segments.length) return false;
   return segments.every((segment) => {
     const words = shellWords(segment);
+    while (['env','command'].includes(basename(words[0] || ''))) words.shift();
     while (words[0]?.includes("=") && !words[0].startsWith("=")) words.shift();
     const name = basename(words[0] || "");
+    if (name === 'git' && words.some(word => ['-D','--delete'].includes(word))) return false;
     if (name === "sed" && words.some((word) => word === "-i" || word.startsWith("--in-place"))) return false;
     if (name === "find" && words.some((word) => ["-delete", "-exec", "-execdir", "-ok", "-okdir"].includes(word))) return false;
     if (readOnlyCommands.has(name)) return true;

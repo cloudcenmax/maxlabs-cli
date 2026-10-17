@@ -1,6 +1,7 @@
 package greenfield
 
 import (
+	"censi/harness/internal/permission"
 	"censi/harness/internal/tools"
 	"context"
 	"encoding/json"
@@ -41,6 +42,11 @@ func TestWorkerAutoOutputCommands(t *testing.T) {
 				assessed, _ := workerAutoCommand(root, command)
 				t.Fatalf("auto %v expected %v, reason %s, assessed %s, error %v", reason == "", entry.Auto, reason, assessed, e)
 			}
+			host := permission.New(permission.Policy{Auto: true, ProjectCommand: func(command string) bool { return ProjectAutoCommand(root, command) }}, nil)
+			hostReason, hostErr := host.Permit(context.Background(), "bash", args, false, nil)
+			if hostErr != nil || (hostReason == "") != entry.Auto {
+				t.Fatalf("host Auto %v expected %v: %s (%v)", hostReason == "", entry.Auto, hostReason, hostErr)
+			}
 		})
 	}
 }
@@ -55,6 +61,18 @@ func TestWorkerTemplateCopyDoesNotOverwriteExistingEnvironment(t *testing.T) {
 	command, ok := workerAutoCommand(root, "cp -n .env.example .env")
 	if !ok || command != "true" {
 		t.Fatal(command, ok)
+	}
+}
+
+func TestProjectAutoDoesNotOverrideOtherModes(t *testing.T) {
+	root := t.TempDir()
+	args := json.RawMessage(`{"command":"composer install --no-interaction 2>&1 | tail -4"}`)
+	for _, policy := range []permission.Policy{{}, {Auto: true, PlanMode: true}} {
+		policy.ProjectCommand = func(command string) bool { return ProjectAutoCommand(root, command) }
+		guard := permission.New(policy, nil)
+		if reason, err := guard.Permit(context.Background(), "bash", args, false, nil); err != nil || reason == "" {
+			t.Fatal("Auto assessment overrode another mode", reason, err)
+		}
 	}
 }
 

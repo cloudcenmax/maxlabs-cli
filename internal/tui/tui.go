@@ -1103,7 +1103,7 @@ func (s *Shell) Ask(ctx context.Context, req permission.Request) (bool, bool, er
 	s.status.println("")
 	s.status.println("      " + s.status.bold("y") + "  allow this once")
 	if req.OneTimeOnly {
-		s.status.println("      " + s.status.tone("This high-impact command must be reviewed each time: "+req.RiskReason))
+		s.status.println("      " + s.status.tone("Review required: "+req.RiskReason))
 	} else {
 		label := req.Tool
 		if req.Tool == "bash" {

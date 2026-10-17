@@ -3,6 +3,43 @@ import { tmpdir } from 'node:os';
 import { extname, isAbsolute, relative, resolve } from 'node:path';
 import { Workspace } from './tools.js';
 import { safeTaskPath } from './greenfield.js';
+import { freshApprovalRisk } from './permission.js';
+
+const projectOutside = /(\.\.[/\\]|~[/\\]|\/(Users|home|etc|root|private|tmp|var|Applications|Volumes)(?:[/\s]|$)|\b(curl|wget|ssh|scp|sftp|rsync|security|sudo)\b|\.maxlabs|\.git[/\\]|\b(?:npm|pnpm|yarn|bun)\s+publish\b)/i;
+function projectEscalation(command       )         {
+ const parts=shellParts(command);if(!parts)return true;let words         =[];
+ const check=()=>{if(!words.length)return false;const n=words[0].split(/[\\/]/).at(-1) .toLowerCase();
+  if(/(?:^|[-_.])(?:deploy|publish|release)(?:$|[-_.])/.test(n))return true;
+  if(['aws','gcloud','az','terraform','pulumi','kubectl','docker','vercel','netlify','fly'].includes(n)&&!['get','describe','logs','version','ps','images','inspect','status'].includes(words[1]))return true;
+  return words.some((w,i)=>{
+   if(/^--(?:prefix|directory|working-dir|project-dir)/.test(w))return true;
+   if(w==='--host'||w.startsWith('--host=')){const host=w==='--host'?words[i+1]:w.slice(7);if(!['127.0.0.1','localhost','::1'].includes(host))return true;}
+   if(['npm','pnpm','yarn','bun','composer','pip','pip3','gem'].includes(n)){
+    if(['-g','--global','--system'].includes(w)||w.startsWith('--global='))return true;
+    if(i===2&&['run','run-script'].includes(words[1])&&/deploy|publish|release/i.test(w))return true;
+   }
+   if(n==='php'&&['migrate:fresh','migrate:reset','migrate:refresh','db:wipe','db:drop','--force','--env=production'].includes(w))return true;
+   return n==='git'&&['-D','--delete'].includes(w);
+  });
+ };
+ for(const part of parts){if(['|',';','\n','&&','||'].includes(part[0])){if(check())return true;words=[];continue;}const v=word(part[0]);if(!words.length&&/^[A-Za-z_][A-Za-z_0-9]*=/.test(v)){if(/^(PATH|HOME|LD_PRELOAD|LD_LIBRARY_PATH|DYLD_INSERT_LIBRARIES|BASH_ENV|ENV)=/.test(v))return true;continue;}if(!words.length&&['env','command'].includes(v))continue;words.push(v);}
+ return check();
+}
+export async function projectAutoCommand(root       ,command       )                  {
+ const assessed=await workerAutoCommand(root,command);
+ return !!assessed&&!projectOutside.test(assessed)&&!projectEscalation(assessed)&&!freshApprovalRisk('bash',{command:assessed});
+}
+function localPreviewRequest(words         )         {
+ if(words.length<2||words[0]!=='curl')return false;let urls=0;
+ for(let i=1;i<words.length;i++){
+  const value=words[i];
+  if(['-s','-S','-sS','-fsS','-f','-I','--head','--silent','--show-error','--fail','--disable','-q'].includes(value))continue;
+  if(['-o','--output'].includes(value)){if(words[++i]!=='/dev/null')return false;continue;}
+  if(['-w','--write-out'].includes(value)){const format=words[++i];if(format===undefined||format.length>256||format.includes('%output'))return false;continue;}
+  if(['--max-time','--connect-timeout'].includes(value)){if(!/^\d+(?:\.\d+)?$/.test(words[++i]||''))return false;continue;}
+  try{const u=new URL(value);if(!/^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::[0-9]+)?(?:[/?]|$)/.test(value)||u.protocol!=='http:'||u.username||u.password||u.hash||!['127.0.0.1','localhost','[::1]'].includes(u.hostname))return false;}catch{return false;}urls++;
+ }return urls===1;
+}
 
 // This is a narrow shell lexer, not a shell interpreter. Unsupported syntax
 // falls back to the ordinary guard. Only validated output destinations disappear
@@ -146,6 +183,11 @@ export async function workerAutoCommand(root        , command        )          
     const previous = parts[i - 2];
     if (previous && /^\d+$/.test(previous[0]) && previous.index  + previous[0].length === start) start = previous.index ;
     ranges.push([start, next.index  + next[0].length, " "]);
+  }
+  // Only literal loopback GET/HEAD requests, without uploads or redirects.
+  for(let start=0;start<parts.length;){let end=start;while(end<parts.length&&!['|',';','\n','&&','||'].includes(parts[end][0]))end++;
+   const words=parts.slice(start,end).filter(part=>!ranges.some(([a,b])=>part.index>=a&&part.index+part[0].length<=b)).map(part=>word(part[0]));
+   if(localPreviewRequest(words)){const a=parts[start].index,b=parts[end-1].index+parts[end-1][0].length;for(let i=ranges.length-1;i>=0;i--)if(ranges[i][0]>=a&&ranges[i][1]<=b)ranges.splice(i,1);ranges.push([a,b,'true']);}start=end+1;
   }
   // Bootstrapping a private worker copy from its non-secret template is normal
   // setup. Existing environment files are preserved unless cp explicitly uses -n.

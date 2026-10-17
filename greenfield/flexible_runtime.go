@@ -60,10 +60,7 @@ func (g *flexibleGuard) Permit(ctx context.Context, name string, args json.RawMe
 		if decision.RefusedNow() {
 			return decision.Explain(), nil
 		}
-		assessed, local := workerAutoCommand(g.root, text(input, "command"))
-		assessment, _ := json.Marshal(map[string]any{"command": assessed})
-		fresh, _ := audit.RequiresFreshApproval("bash", assessment)
-		if !local || fresh || outsideCommand.MatchString(assessed) {
+		if !ProjectAutoCommand(g.root, text(input, "command")) {
 			if g.base != nil {
 				return g.base.Permit(ctx, "bash", normalized, false, t)
 			}

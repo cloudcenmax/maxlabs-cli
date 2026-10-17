@@ -141,7 +141,7 @@ export function systemPrompt(mode                         )         {
   const modePolicy = mode === "plan"
     ? "Plan mode is active. Inspect freely, but do not modify files or run commands that change state."
     : mode === "auto"
-      ? "Audited auto mode is active. Safe work may proceed, but destructive, opaque, drifting, or network operations still require approval."
+      ? "Auto mode is active. Routine work within the assigned project, dependency setup, tests, bounded logs, and local preview GET/HEAD checks may proceed. Review is required for destructive operations, credentials, external uploads, publishing, system changes, or commands whose scope cannot be established."
       : "Act mode is active. Read-only work proceeds; state-changing operations require approval.";
   return [
     "You are MaxLabs CLI, a coding agent operating inside one workspace.",

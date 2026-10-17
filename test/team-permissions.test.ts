@@ -3,7 +3,7 @@ import { mkdtemp, readFile, symlink, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { workerAutoCommand } from '../src/team-permissions.ts';
+import { workerAutoCommand, projectAutoCommand } from '../src/team-permissions.ts';
 import { FlexiblePermissions } from '../src/team-flexible.ts';
 import { TeamStore } from '../src/greenfield.ts';
 import { Workspace, createTools } from '../src/tools.ts';
@@ -15,13 +15,19 @@ test('worker Auto permits bounded test output, with the same command cases as de
  await symlink(outside,join(root,'escape'));await symlink(outside,join(root,'quoted-escape'));await writeFile(join(outside,'secret'),'private');await symlink(join(outside,'secret'),join(root,'link-to-secret.log'));
  const guard = new FlexiblePermissions(new TeamStore(await Workspace.open(root)),false,new PermissionGuard('auto',async()=> 'deny'));
  const tool:any={schema:{name:'verify'},readOnly:false};
- for(const entry of cases){const command=entry.command.replaceAll('{root}',root).replaceAll('{tmp}',tmpdir());const assessed=await workerAutoCommand(root,command);const auto=assessed!==undefined&&await guard.permit(tool,{command})===undefined;assert.equal(auto,entry.auto,command+' => '+assessed);}
+ for(const entry of cases){const command=entry.command.replaceAll('{root}',root).replaceAll('{tmp}',tmpdir());const assessed=await workerAutoCommand(root,command);const auto=assessed!==undefined&&await guard.permit(tool,{command})===undefined;assert.equal(auto,entry.auto,command+' => '+assessed);const host=new PermissionGuard('auto',async()=> 'deny',command=>projectAutoCommand(root,command));assert.equal(await host.permit({...tool,schema:{name:'bash'}},{command})===undefined,entry.auto,'host Auto: '+command);}
 });
 test('worker setup preserves existing environment configuration',async()=>{
  const root=await mkdtemp(join(tmpdir(),'team-env-permission-'));await writeFile(join(root,'.env.example'),'APP_NAME=Test');await writeFile(join(root,'.env'),'APP_KEY=existing');
  assert.match((await workerAutoCommand(root,'cp .env.example .env'))!,/\.env/);
  assert.equal(await workerAutoCommand(root,'cp -n .env.example .env'),'true');
  assert.equal(await readFile(join(root,'.env'),'utf8'),'APP_KEY=existing');
+});
+
+test('workspace Auto assessment does not override act or plan mode',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'team-auto-mode-'));
+ const tool:any={schema:{name:'bash'},readOnly:false};
+ for(const mode of ['act','plan'] as const){const guard=new PermissionGuard(mode,async()=> 'deny',command=>projectAutoCommand(root,command));assert.notEqual(await guard.permit(tool,{command:'composer install --no-interaction 2>&1 | tail -4'}),undefined);}
 });
 
 test('reported inspection command executes without prompting or reading environment values',async()=>{

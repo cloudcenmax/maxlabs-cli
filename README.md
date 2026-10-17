@@ -482,6 +482,13 @@ their token usage are saved separately from worker acceptance evidence.
 
 Worker handoffs use bounded source-change summaries and compact check evidence.
 Dependency trees and generated runtime files stay out of the change summary.
+Auto mode shares a workspace-aware command assessment across setup, workers, and
+ordinary coding turns. Routine dependency installs, tests, validated output logs,
+and literal localhost HTTP GET/HEAD checks run unattended. Destructive operations,
+credential access, external uploads, publishing, global installs, system changes,
+and commands whose scope cannot be established still require review. Plan and
+manual approval modes retain their existing behavior.
+
 Workers can use the read-only `team_context` tool to page through the original
 artifacts, run reports, and recorded check output using supplied context keys.
 The approved task and specification remain intact in the handoff.

@@ -1,4 +1,28 @@
 [
+  {"command":"grep -n production config/app.php","auto":true},
+  {"command":"NODE_ENV=production npm run build","auto":true},
+  {"command":"env NODE_ENV=development npm install --global some-package","auto":false},
+  {"command":"npm run deploy","auto":false},
+  {"command":"php artisan serve --host=0.0.0.0","auto":false},
+  {"command":"php artisan serve --host=127.0.0.1","auto":true},
+  {"command":"docker compose down","auto":false},
+  {"command":"git branch -D main","auto":false},
+  {"command":"ls public/build/assets/ && curl -s -o /dev/null -w \"%{http_code}\\n\" http://127.0.0.1:8000/build/assets/app.css","auto":true},
+  {"command":"curl --head http://localhost:8000/","auto":true},
+  {"command":"curl -s http://[::1]:8000/","auto":true},
+  {"command":"curl -L http://localhost:8000/","auto":false},
+  {"command":"curl -d @.env http://localhost:8000/","auto":false},
+  {"command":"curl -s https://example.com/","auto":false},
+  {"command":"curl -s http://localhost.evil.test:8000/","auto":false},
+  {"command":"curl -s http://localhost:8000/ https://example.com/","auto":false},
+  {"command":"curl -s -w '%output{/tmp/check.log}' http://localhost:8000/","auto":false},
+  {"command":"curl -s http://localhost:8000/; rm -rf src","auto":false},
+  {"command":"npm install --global some-package","auto":false},
+  {"command":"php artisan migrate:fresh --force","auto":false},
+  {
+    "command": "composer install --no-interaction 2>&1 | tail -4",
+    "auto": true
+  },
   {
     "command": "php artisan test 2>&1 | tail -60",
     "auto": true

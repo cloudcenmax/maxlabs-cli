@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"censi/harness/greenfield"
 	"censi/harness/internal/agent"
 	"censi/harness/internal/assemble"
 	"censi/harness/internal/llm"
@@ -118,7 +119,7 @@ func run() error {
 
 	// The guard is shared with the shell and with every subagent: a delegated
 	// task must not become a way around a refusal the user gave.
-	guard := permission.New(permission.Policy{Auto: *autoMode}, nil)
+	guard := permission.New(permission.Policy{Auto: *autoMode, ProjectCommand: func(command string) bool { return greenfield.ProjectAutoCommand(ws.Root(), command) }}, nil)
 
 	// The delegation tool is registered before the parent's tool list is
 	// complete, then told the complete list. It has to inherit its own

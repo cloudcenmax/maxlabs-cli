@@ -355,6 +355,37 @@ func workerAutoCommand(root, command string) (string, bool) {
 		}
 		ranges = append(ranges, workerAssessmentRange{start, next[1], " "})
 	}
+	// A literal loopback GET/HEAD cannot upload data or follow an external redirect.
+	for start := 0; start < len(parts); {
+		end := start
+		for end < len(parts) && !strings.Contains("|;\n", command[parts[end][0]:parts[end][1]]) && command[parts[end][0]:parts[end][1]] != "&&" && command[parts[end][0]:parts[end][1]] != "||" {
+			end++
+		}
+		words := []string{}
+		for _, part := range parts[start:end] {
+			covered := false
+			for _, r := range ranges {
+				if part[0] >= r.start && part[1] <= r.end {
+					covered = true
+					break
+				}
+			}
+			if !covered {
+				words = append(words, workerShellWord(command[part[0]:part[1]]))
+			}
+		}
+		if localPreviewRequest(words) {
+			a, b := parts[start][0], parts[end-1][1]
+			kept := ranges[:0]
+			for _, r := range ranges {
+				if r.end <= a || r.start >= b {
+					kept = append(kept, r)
+				}
+			}
+			ranges = append(kept, workerAssessmentRange{a, b, "true"})
+		}
+		start = end + 1
+	}
 	// Allow only the literal environment-template copy; never overwrite a
 	// previously configured worker environment without an explicit review.
 	for i, part := range parts {

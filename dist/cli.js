@@ -13,6 +13,7 @@ import { TeamStore, runApprovedTasks, environmentCommands, allowedCheck, createT
 import { TeamDirectionReview, teamDirectionPrompt, TeamExecutionReview, teamExecutionPrompt } from "./team-steering.js";
 import { referenceNamed } from "./team-reference.js";
 import { TeamPreview } from "./team-preview.js";
+import { projectAutoCommand } from "./team-permissions.js";
 import { teamStatusText, teamArtifactText, teamNext } from "./team-view.js";
 import { emptyUsage } from "./types.js";
 
@@ -146,7 +147,7 @@ async function main()                {
     process.stdout.write(`      ${ui.bold(tool)} ${ui.tone(JSON.stringify(args).slice(0, 500))}\n\n`);
     process.stdout.write(`      ${ui.bold("y")}  allow this once\n`);
     if (decision.oneTimeOnly) {
-      process.stdout.write(`      ${ui.tone(`This high-impact command must be reviewed each time: ${decision.reason}`)}\n`);
+      process.stdout.write(`      ${ui.tone(`Review required: ${decision.reason}`)}\n`);
     } else {
       process.stdout.write(`      ${ui.bold("a")}  always allow ${ui.code(decision.scope)} for this session\n`);
     }
@@ -156,7 +157,7 @@ async function main()                {
     if (answer === "a" || answer === "always" || answer === "all") return "always";
     if (["y", "yes", "allow", "ok"].includes(answer)) return "once";
     return "deny";
-  });
+  }, command => projectAutoCommand(workspace.root, command));
   router.onToggleMode = () => {
     teamMode = false;
     guard.mode = guard.mode === "plan" ? "act" : "plan";

@@ -6,15 +6,14 @@ import { sourceDigest, recoverySourceFiles, captureAction, budgetHandoff } from 
 
 import { applicationChangeSummary, compactChecks, contextIndex, cachedContextTool } from './team-context.js';
 import { qaTestPath, qaSourceChanges } from './team-qa.js';
-import { workerAutoCommand } from './team-permissions.js';
-import { PermissionGuard, freshApprovalRisk } from './permission.js';
+import { projectAutoCommand } from './team-permissions.js';
+import { PermissionGuard } from './permission.js';
 import { SessionLog, SteeringQueue } from './session.js';
 import { Workspace, createTools, ToolRegistry,           } from './tools.js';
 
 
 import { completedReport, teamWorkerStepLimit,                                              } from './greenfield.js';
 import { checkpoint, git, prepareExecution, sourceFiles, sameFiles, workerEnvironment } from './team-workspace.js';
-const outside=/(\.\.[/\\]|~[/\\]|\/(Users|home|etc|root|private|tmp|var|Applications|Volumes)(?:[/\s]|$)|\b(curl|wget|ssh|scp|sftp|rsync|security|sudo)\b|\.maxlabs|\.git[/\\]|(?:^|[\s/])\.env(?:[\s.]|$)|\b(?:npm|pnpm|yarn|bun)\s+publish\b)/i;
 function verified(checks                  )         {let start=0;checks.forEach((c,i)=>{if(c.final&&c.passed)start=i;});const latest=new Map(checks.slice(start).map(c=>[c.command,c.passed]));return latest.size>0&&[...latest.values()].every(Boolean);}
 export async function runFlexibleWave(store          ,child          ,ids         ,signal             )                    {
  return store.locked(async state=>{
@@ -65,7 +64,7 @@ export class FlexiblePermissions extends PermissionGuard {
   if(['write','edit'].includes(name)){if(this.qa){const raw=String(args.path||''),path=isAbsolute(raw)?relative(this.rootStore.workspace.root,raw).replaceAll('\\','/'):raw;if(!this.qaBefore||!qaTestPath(path)||Object.hasOwn(this.qaBefore,path))return 'Independent QA may add or refine new regression tests, but cannot change application source or pre-existing tests';}try{await this.rootStore.workerPath(String(args.path||''));return;}catch(error){return String(error);}}
   if(name==='read'){try{await this.rootStore.workerPath(String(args.path||''));return;}catch(error){return String(error);}}
   if(name==='webfetch'){if(++this.fetches>6)return 'Documentation budget reached';return;}
-  if(name==='bash'||name==='verify'){const assessed=await workerAutoCommand(this.rootStore.workspace.root,String(args.command||''));if(!assessed||freshApprovalRisk('bash',{command:assessed})||outside.test(assessed))return this.base.permit({...tool,schema:{...tool.schema,name:'bash'}},args);return;}
+  if(name==='bash'||name==='verify'){if(!await projectAutoCommand(this.rootStore.workspace.root,String(args.command||'')))return this.base.permit({...tool,schema:{...tool.schema,name:'bash'}},args);return;}
   return;
  }
 }
