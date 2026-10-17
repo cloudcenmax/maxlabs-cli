@@ -133,9 +133,9 @@ Two tiers, deliberately separated:
 - **Offline** (always runs). `llm.PrefixCacheStub` models prefix-only matching
   from token 0 and the block-size floor below which nothing is cached, so the
   cache-hit gate runs without a network. Mocks establish append-extension.
-- **Live** (not yet present). Sufficiency requires a real provider cache hit.
-  Mocks can only overstate hits, never understate them, so the offline gate is
-  necessary but not sufficient.
+- **Live** (opt-in from a source checkout). `scripts/greenfield-e2e-proxy.mjs`
+  records actual provider token/cache receipts across planner and child calls.
+  Offline mocks alone do not establish live caching or end-to-end correctness.
 
 Several tests are **mutation tests**: they assert that a deliberate mistake
 *collapses* the hit rate or *breaks* prefix extension. If they ever stop failing,
@@ -433,3 +433,75 @@ three escape sequences cover the whole thing.
 Set `Ansi` false (the runner does this automatically when stdout is not a
 terminal) and every escape is suppressed, so a piped or redirected run produces
 clean text.
+
+## Greenfield SDE Team (Beta)
+
+A Laravel workflow for taking an idea through discovery, a design prototype,
+reviewed specifications, a working foundation, implementation, independent QA,
+and release acceptance. Start it with `maxlabs --team`, or enter `/team` in an
+interactive session. Describe the app, answer the planner's questions, and review
+its artifacts before approving implementation.
+
+```text
+/team status                 show stage, readiness, task results and artifact IDs
+/team run                    resume a batch of approved tasks without planner calls
+/team show application       read a saved contract
+/team preview                export the interactive HTML design preview
+/team reference ../admin     attach a directory as a read-only design reference
+/team approve design         accept the current design and continue planning
+/team approve spec           authorize the listed changes/checks and start workers
+/team approve release        accept delivery after every task and QA passes
+/team model worker           select an enabled implementation model
+/team off                    leave the workflow without deleting its state
+```
+
+The normal `/model` selects the planner. `--worker-model ID` or `/team model ID`
+selects workers independently; researchers use the planner model. An omitted
+worker model inherits the planner. Normal Chat/Act, Plan, and Auto remain
+available. Leaving this workflow preserves artifacts; `/team` resumes it.
+
+State is project-local at `.maxlabs/team/state.json`, with versioned JSON
+contracts under `artifacts/`. JSON is the beta's canonical YAML-1.2-compatible
+format. The desktop app reads the same format, so it can continue the same
+project. `greenfield/pack.json` defines the shared contract and Laravel guidance;
+`greenfield/README.md` describes execution and boundaries.
+
+Design and spec approvals bind to artifact hashes. Changing planning contracts
+invalidates relevant approvals. A spec must cover every acceptance requirement,
+have a foundation task, an acyclic dependency graph, independent read-only QA,
+and no unresolved questions or review blockers. Files used by tasks are
+fingerprinted at approval; unexpected changes require review and reapproval.
+
+Research can run three agents concurrently, up to six per turn. Public reference
+fetches are permitted in this workflow and stored as evidence snapshots with
+URLs, retrieval times, and hashes. Research reports and normalized integration
+contracts are reusable; snapshots are evidence, not proof of live API behavior.
+Workers run sequentially, up to eight tasks per turn and three attempts per task.
+Each child is capped at forty steps. Release scope is limited to sixty-four tasks
+and 128 artifacts. Continue in another turn when a turn budget is reached.
+
+Workers cannot use a shell, delegate, edit workflow state, or write outside their
+exact approved file list. Approved checks execute through the runner, which owns
+pass/fail status. Those commands run with ordinary workspace permissions; file
+scopes are tool-level boundaries, not OS process isolation. Existing permission
+prompts still govern the initial Composer bootstrap. A foundation task may
+bootstrap a confirmed Laravel major into an empty workspace, then install
+dependencies and run checks listed in its approved contract.
+
+Prototype HTML is self-contained; desktop previews run in a sandboxed iframe
+with network requests disabled. Browser, visual, and accessibility checks require
+corresponding project tooling and approved check scripts. The beta does not
+promise hallucination-free generation or automatic production deployment.
+
+Approved task dispatch follows the DAG deterministically, with no coordinator
+inference between workers. It stops at the first failure; a worker's completion
+claim alone cannot advance the plan. A malformed completion report gets at most
+one tool-free formatting request. Retries receive the previous failure summary
+and check logs. Model-visible tool output is bounded to 16 KB; complete check
+logs and immutable attempt reports remain under `.maxlabs/team/checks/` and
+`runs/`. A successful batch creates the release handoff for review. The desktop
+provides matching resume and spec-reapproval controls.
+
+The recorded personal-task-manager acceptance run is in
+[`greenfield/e2e/personal-task-manager.json`](greenfield/e2e/personal-task-manager.json).
+It includes development failures and fixes; it is not a clean-run price estimate.

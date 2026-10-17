@@ -1,0 +1,2523 @@
+{
+  "scenario": "Very simple personal task manager: Laravel 13, Blade/plain CSS, SQLite, no authentication, no integrations.",
+  "outcome": "passed after implementation fixes and assisted plan review; desktop release gate accepted",
+  "clients": "CLI discovery/design/spec; desktop foundation/implementation; CLI final independent QA; desktop release acceptance. Shared workspace state used throughout.",
+  "models": {
+    "planner_and_research": "pro",
+    "implementation_and_qa": "worker"
+  },
+  "versions": {
+    "laravel/framework": "v13.37.0",
+    "phpunit/phpunit": "12.5.40"
+  },
+  "verification": {
+    "app_tests": {
+      "tool": "phpunit",
+      "result": "passed",
+      "tests": 33,
+      "passed": 33,
+      "assertions": 116,
+      "duration_ms": 199
+    },
+    "browser_cases": [
+      "empty state",
+      "title validation error with aria-invalid=true and preserved notes",
+      "create task",
+      "prefilled edit",
+      "save edit",
+      "complete with group/count update",
+      "reopen",
+      "delete",
+      "empty state after delete",
+      "friendly 404 with return link"
+    ],
+    "sqlite_rows_after_delete": 0,
+    "tasks": {
+      "task-add-list-foundation": {
+        "status": "passed",
+        "checks": [
+          {
+            "command": "composer install --no-interaction",
+            "passed": true
+          },
+          {
+            "command": "php artisan test",
+            "passed": true
+          },
+          {
+            "command": "php artisan route:list",
+            "passed": true
+          }
+        ]
+      },
+      "task-edit-toggle-delete": {
+        "status": "passed",
+        "checks": [
+          {
+            "command": "php artisan test",
+            "passed": true
+          },
+          {
+            "command": "php artisan route:list",
+            "passed": true
+          }
+        ]
+      },
+      "task-independent-qa": {
+        "status": "passed",
+        "checks": [
+          {
+            "command": "composer install --no-interaction",
+            "passed": true
+          },
+          {
+            "command": "php artisan test",
+            "passed": true
+          },
+          {
+            "command": "php artisan route:list",
+            "passed": true
+          }
+        ]
+      }
+    },
+    "release_approved": true,
+    "harness_checks": [
+      "45 Node tests passed",
+      "CLI/shared Go suites passed",
+      "desktop Go suites passed",
+      "Greenfield Go race suite passed",
+      "Windows shared-core test binary cross-compiled",
+      "native macOS desktop build passed",
+      "npm package dry-run passed"
+    ]
+  },
+  "usage": {
+    "full_development_and_debug_run": {
+      "uncachedInputTokens": 572724,
+      "cacheReadTokens": 2036032,
+      "cacheWriteTokens": 0,
+      "outputTokens": 112343,
+      "reasoningTokens": 49208,
+      "webSearches": 0,
+      "requests": 144,
+      "unknown_usage": 1,
+      "request_duration_sum_ms": 898906,
+      "input_total": 2608756,
+      "known_input_plus_output": 2721099
+    },
+    "by_role": {
+      "planner": {
+        "uncachedInputTokens": 355108,
+        "cacheReadTokens": 1358592,
+        "cacheWriteTokens": 0,
+        "outputTokens": 78663,
+        "reasoningTokens": 38261,
+        "webSearches": 0,
+        "requests": 59,
+        "unknown_usage": 0,
+        "request_duration_sum_ms": 507848,
+        "input_total": 1713700,
+        "known_input_plus_output": 1792363
+      },
+      "research": {
+        "uncachedInputTokens": 33458,
+        "cacheReadTokens": 75648,
+        "cacheWriteTokens": 0,
+        "outputTokens": 5321,
+        "reasoningTokens": 2233,
+        "webSearches": 0,
+        "requests": 8,
+        "unknown_usage": 0,
+        "request_duration_sum_ms": 52456,
+        "input_total": 109106,
+        "known_input_plus_output": 114427
+      },
+      "worker": {
+        "uncachedInputTokens": 126898,
+        "cacheReadTokens": 523328,
+        "cacheWriteTokens": 0,
+        "outputTokens": 24848,
+        "reasoningTokens": 8059,
+        "webSearches": 0,
+        "requests": 65,
+        "unknown_usage": 1,
+        "request_duration_sum_ms": 297726,
+        "input_total": 650226,
+        "known_input_plus_output": 675074
+      },
+      "qa": {
+        "uncachedInputTokens": 57260,
+        "cacheReadTokens": 78464,
+        "cacheWriteTokens": 0,
+        "outputTokens": 3511,
+        "reasoningTokens": 655,
+        "webSearches": 0,
+        "requests": 12,
+        "unknown_usage": 0,
+        "request_duration_sum_ms": 40876,
+        "input_total": 135724,
+        "known_input_plus_output": 139235
+      }
+    },
+    "deterministic_dispatch_phase_including_failed_attempts": {
+      "uncachedInputTokens": 133564,
+      "cacheReadTokens": 364992,
+      "cacheWriteTokens": 0,
+      "outputTokens": 18877,
+      "reasoningTokens": 6938,
+      "webSearches": 0,
+      "requests": 47,
+      "unknown_usage": 0,
+      "request_duration_sum_ms": 244820,
+      "input_total": 498556,
+      "known_input_plus_output": 517433
+    },
+    "successful_task_attempts_only": {
+      "uncachedInputTokens": 65879,
+      "cacheReadTokens": 219392,
+      "cacheWriteTokens": 0,
+      "outputTokens": 12792,
+      "reasoningTokens": 4297,
+      "webSearches": 0,
+      "requests": 25,
+      "unknown_usage": 0,
+      "request_duration_sum_ms": 168711,
+      "input_total": 285271,
+      "known_input_plus_output": 298063
+    },
+    "successful_task_attempt_request_ranges": [
+      [
+        115,
+        123
+      ],
+      [
+        124,
+        132
+      ],
+      [
+        138,
+        144
+      ]
+    ],
+    "note": "Provider-reported receipts; one interrupted request has unknown usage, so recorded totals are a lower bound. Reasoning is included in output, never added twice. Request-duration sums overlap for parallel research and are not end-to-end elapsed time. The full run includes coding-time fixes, retries, plan amendments and a long pause; this is not a clean-run cost baseline. Successful-task numbers exclude planning and earlier failed attempts and are not a fresh-workspace benchmark."
+  },
+  "monetary_cost": null,
+  "monetary_cost_note": "No monetary receipt or applicable price table was returned. No dollar estimate was invented.",
+  "findings_and_changes": [
+    "Guarded generic tools were wasting coordinator tokens; hide blocked tools and add fixed environment probes.",
+    "Version research needed a six-fetch ceiling and on-demand compact artifact reads.",
+    "Prose around strict worker JSON caused failure; add one bounded tool-free format repair.",
+    "Coordinator investigations and a huge grep result inflated context; dispatch approved DAGs deterministically and bound model-visible tool results to 16 KB.",
+    "Keep all PHPUnit failure summaries and full bounded check logs with immutable attempt archives.",
+    "Give retries previous failure evidence.",
+    "QA initially blocked because it had no shell; execute checks before read-only QA and supply actual verification evidence.",
+    "Generated sample needed a missing form wrapper, database lifecycle for the skeleton smoke test and a corrected redirect/session test. These required assisted review; this was not an unattended first-pass success."
+  ],
+  "limitations": [
+    "Local-only sample has no authentication.",
+    "Sample delete confirmation enhancement from the prototype is not wired; deletion submits directly.",
+    "No external integration or dedicated accessibility/screen-reader audit was performed.",
+    "A clean run of the final version from a fresh vague idea has not been benchmarked; do not treat development totals as expected app cost."
+  ],
+  "receipts": [
+    {
+      "id": 1,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:23:36.158Z",
+      "duration_ms": 3117,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2672,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 201,
+        "reasoningTokens": 42,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 2,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:23:39.285Z",
+      "duration_ms": 2459,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 3242,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 149,
+        "reasoningTokens": 67,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 3,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:23:41.751Z",
+      "duration_ms": 17298,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 157,
+        "cacheReadTokens": 3200,
+        "cacheWriteTokens": 0,
+        "outputTokens": 2163,
+        "reasoningTokens": 1297,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 4,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:23:59.064Z",
+      "duration_ms": 23849,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1131,
+        "cacheReadTokens": 3328,
+        "cacheWriteTokens": 0,
+        "outputTokens": 4933,
+        "reasoningTokens": 261,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 5,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:24:22.919Z",
+      "duration_ms": 42861,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 4815,
+        "cacheReadTokens": 4352,
+        "cacheWriteTokens": 0,
+        "outputTokens": 8192,
+        "reasoningTokens": 4485,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 6,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:25:06.188Z",
+      "duration_ms": 26339,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 79,
+        "cacheReadTokens": 9088,
+        "cacheWriteTokens": 0,
+        "outputTokens": 5705,
+        "reasoningTokens": 51,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 7,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:25:32.540Z",
+      "duration_ms": 7953,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 5935,
+        "cacheReadTokens": 9088,
+        "cacheWriteTokens": 0,
+        "outputTokens": 777,
+        "reasoningTokens": 36,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 8,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:30:41.374Z",
+      "duration_ms": 3755,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2554,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 98,
+        "reasoningTokens": 20,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 9,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:30:45.460Z",
+      "duration_ms": 4448,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1149,
+        "cacheReadTokens": 2432,
+        "cacheWriteTokens": 0,
+        "outputTokens": 224,
+        "reasoningTokens": 92,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 10,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:30:49.915Z",
+      "duration_ms": 2040,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 371,
+        "cacheReadTokens": 3456,
+        "cacheWriteTokens": 0,
+        "outputTokens": 52,
+        "reasoningTokens": 12,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 11,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:30:51.959Z",
+      "duration_ms": 2388,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 215,
+        "cacheReadTokens": 3712,
+        "cacheWriteTokens": 0,
+        "outputTokens": 101,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 12,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:30:54.354Z",
+      "duration_ms": 5248,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 11050,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 578,
+        "reasoningTokens": 467,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 13,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:31:00.906Z",
+      "duration_ms": 6172,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 7358,
+        "cacheReadTokens": 3840,
+        "cacheWriteTokens": 0,
+        "outputTokens": 596,
+        "reasoningTokens": 409,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 14,
+      "role": "research",
+      "model": "pro",
+      "started_at": "2026-10-16T16:31:07.084Z",
+      "duration_ms": 4123,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 875,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 205,
+        "reasoningTokens": 102,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 15,
+      "role": "research",
+      "model": "pro",
+      "started_at": "2026-10-16T16:31:12.706Z",
+      "duration_ms": 4114,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1565,
+        "cacheReadTokens": 768,
+        "cacheWriteTokens": 0,
+        "outputTokens": 393,
+        "reasoningTokens": 216,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 16,
+      "role": "research",
+      "model": "pro",
+      "started_at": "2026-10-16T16:31:18.392Z",
+      "duration_ms": 6108,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1718,
+        "cacheReadTokens": 2304,
+        "cacheWriteTokens": 0,
+        "outputTokens": 706,
+        "reasoningTokens": 564,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 17,
+      "role": "research",
+      "model": "pro",
+      "started_at": "2026-10-16T16:31:25.577Z",
+      "duration_ms": 3784,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 243,
+        "cacheReadTokens": 3968,
+        "cacheWriteTokens": 0,
+        "outputTokens": 307,
+        "reasoningTokens": 138,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 18,
+      "role": "research",
+      "model": "pro",
+      "started_at": "2026-10-16T16:31:31.101Z",
+      "duration_ms": 5309,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 15041,
+        "cacheReadTokens": 4096,
+        "cacheWriteTokens": 0,
+        "outputTokens": 300,
+        "reasoningTokens": 124,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 19,
+      "role": "research",
+      "model": "pro",
+      "started_at": "2026-10-16T16:31:37.800Z",
+      "duration_ms": 5382,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2147,
+        "cacheReadTokens": 19072,
+        "cacheWriteTokens": 0,
+        "outputTokens": 434,
+        "reasoningTokens": 252,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 20,
+      "role": "research",
+      "model": "pro",
+      "started_at": "2026-10-16T16:31:44.419Z",
+      "duration_ms": 4196,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 3215,
+        "cacheReadTokens": 21120,
+        "cacheWriteTokens": 0,
+        "outputTokens": 337,
+        "reasoningTokens": 162,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 21,
+      "role": "research",
+      "model": "pro",
+      "started_at": "2026-10-16T16:31:49.651Z",
+      "duration_ms": 19440,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 8654,
+        "cacheReadTokens": 24320,
+        "cacheWriteTokens": 0,
+        "outputTokens": 2639,
+        "reasoningTokens": 675,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 22,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:32:09.098Z",
+      "duration_ms": 3561,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 448,
+        "cacheReadTokens": 11136,
+        "cacheWriteTokens": 0,
+        "outputTokens": 224,
+        "reasoningTokens": 135,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 23,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:32:12.939Z",
+      "duration_ms": 28083,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1484,
+        "cacheReadTokens": 11520,
+        "cacheWriteTokens": 0,
+        "outputTokens": 3725,
+        "reasoningTokens": 1746,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 24,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:32:41.047Z",
+      "duration_ms": 11622,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 15452,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 1395,
+        "reasoningTokens": 238,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 25,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:32:52.684Z",
+      "duration_ms": 9310,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1483,
+        "cacheReadTokens": 15360,
+        "cacheWriteTokens": 0,
+        "outputTokens": 835,
+        "reasoningTokens": 49,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 26,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:33:25.302Z",
+      "duration_ms": 12197,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 991,
+        "cacheReadTokens": 16768,
+        "cacheWriteTokens": 0,
+        "outputTokens": 2135,
+        "reasoningTokens": 265,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 27,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:33:37.513Z",
+      "duration_ms": 7635,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2200,
+        "cacheReadTokens": 17664,
+        "cacheWriteTokens": 0,
+        "outputTokens": 1433,
+        "reasoningTokens": 21,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 28,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:33:45.165Z",
+      "duration_ms": 5652,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1691,
+        "cacheReadTokens": 19840,
+        "cacheWriteTokens": 0,
+        "outputTokens": 687,
+        "reasoningTokens": 20,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 29,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:34:06.143Z",
+      "duration_ms": 8396,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 751,
+        "cacheReadTokens": 21504,
+        "cacheWriteTokens": 0,
+        "outputTokens": 920,
+        "reasoningTokens": 860,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 30,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:34:14.552Z",
+      "duration_ms": 21065,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2844,
+        "cacheReadTokens": 22144,
+        "cacheWriteTokens": 0,
+        "outputTokens": 3572,
+        "reasoningTokens": 1540,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 31,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:34:35.638Z",
+      "duration_ms": 33455,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2385,
+        "cacheReadTokens": 24960,
+        "cacheWriteTokens": 0,
+        "outputTokens": 7040,
+        "reasoningTokens": 2972,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 32,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:35:09.113Z",
+      "duration_ms": 8123,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 4522,
+        "cacheReadTokens": 27264,
+        "cacheWriteTokens": 0,
+        "outputTokens": 1147,
+        "reasoningTokens": 459,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 33,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:35:17.254Z",
+      "duration_ms": 7343,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1041,
+        "cacheReadTokens": 31744,
+        "cacheWriteTokens": 0,
+        "outputTokens": 1410,
+        "reasoningTokens": 20,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 34,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:35:24.623Z",
+      "duration_ms": 3234,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1861,
+        "cacheReadTokens": 32768,
+        "cacheWriteTokens": 0,
+        "outputTokens": 81,
+        "reasoningTokens": 31,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 35,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:35:27.873Z",
+      "duration_ms": 6431,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 3385,
+        "cacheReadTokens": 34560,
+        "cacheWriteTokens": 0,
+        "outputTokens": 790,
+        "reasoningTokens": 55,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 36,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:36:28.027Z",
+      "duration_ms": 12626,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 921,
+        "cacheReadTokens": 37888,
+        "cacheWriteTokens": 0,
+        "outputTokens": 2318,
+        "reasoningTokens": 696,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 37,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:36:40.680Z",
+      "duration_ms": 5441,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2125,
+        "cacheReadTokens": 38784,
+        "cacheWriteTokens": 0,
+        "outputTokens": 525,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 38,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:37:42.286Z",
+      "duration_ms": 2911,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2747,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 66,
+        "reasoningTokens": 14,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 39,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:37:45.213Z",
+      "duration_ms": 2650,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 3525,
+        "cacheReadTokens": 2688,
+        "cacheWriteTokens": 0,
+        "outputTokens": 199,
+        "reasoningTokens": 41,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 40,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:37:47.882Z",
+      "duration_ms": 3251,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 3134,
+        "cacheReadTokens": 6144,
+        "cacheWriteTokens": 0,
+        "outputTokens": 123,
+        "reasoningTokens": 40,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 41,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:38:16.334Z",
+      "duration_ms": 2032,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 5479,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 51,
+        "reasoningTokens": 6,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 42,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:38:18.373Z",
+      "duration_ms": 4282,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2101,
+        "cacheReadTokens": 5376,
+        "cacheWriteTokens": 0,
+        "outputTokens": 587,
+        "reasoningTokens": 15,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 43,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:38:22.662Z",
+      "duration_ms": 3988,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 769,
+        "cacheReadTokens": 7360,
+        "cacheWriteTokens": 0,
+        "outputTokens": 449,
+        "reasoningTokens": 66,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 44,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:38:26.653Z",
+      "duration_ms": 4167,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 480,
+        "cacheReadTokens": 8064,
+        "cacheWriteTokens": 0,
+        "outputTokens": 809,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 45,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:38:30.823Z",
+      "duration_ms": 3538,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 938,
+        "cacheReadTokens": 8448,
+        "cacheWriteTokens": 0,
+        "outputTokens": 581,
+        "reasoningTokens": 36,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 46,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:38:34.368Z",
+      "duration_ms": 9162,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 678,
+        "cacheReadTokens": 9280,
+        "cacheWriteTokens": 0,
+        "outputTokens": 1828,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 47,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:38:43.533Z",
+      "duration_ms": 9467,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1946,
+        "cacheReadTokens": 9856,
+        "cacheWriteTokens": 0,
+        "outputTokens": 1262,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 48,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:38:53.001Z",
+      "duration_ms": 4097,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 13101,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 306,
+        "reasoningTokens": 198,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 49,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:38:57.102Z",
+      "duration_ms": 4311,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1507,
+        "cacheReadTokens": 11712,
+        "cacheWriteTokens": 0,
+        "outputTokens": 507,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 50,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:39:01.425Z",
+      "duration_ms": 2393,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 709,
+        "cacheReadTokens": 9216,
+        "cacheWriteTokens": 0,
+        "outputTokens": 172,
+        "reasoningTokens": 49,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 51,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:39:03.847Z",
+      "duration_ms": 2967,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 4696,
+        "cacheReadTokens": 9856,
+        "cacheWriteTokens": 0,
+        "outputTokens": 230,
+        "reasoningTokens": 79,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 52,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:39:06.848Z",
+      "duration_ms": 6027,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 485,
+        "cacheReadTokens": 14464,
+        "cacheWriteTokens": 0,
+        "outputTokens": 665,
+        "reasoningTokens": 491,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 53,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:39:12.904Z",
+      "duration_ms": 4239,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1183,
+        "cacheReadTokens": 14848,
+        "cacheWriteTokens": 0,
+        "outputTokens": 291,
+        "reasoningTokens": 155,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 54,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:39:17.460Z",
+      "duration_ms": 3090,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 913,
+        "cacheReadTokens": 16000,
+        "cacheWriteTokens": 0,
+        "outputTokens": 247,
+        "reasoningTokens": 135,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 55,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:39:20.569Z",
+      "duration_ms": 2769,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1018,
+        "cacheReadTokens": 16896,
+        "cacheWriteTokens": 0,
+        "outputTokens": 150,
+        "reasoningTokens": 85,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 56,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:39:23.350Z",
+      "duration_ms": 5430,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 5363,
+        "cacheReadTokens": 17792,
+        "cacheWriteTokens": 0,
+        "outputTokens": 647,
+        "reasoningTokens": 426,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 57,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:39:28.808Z",
+      "duration_ms": 2630,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1439,
+        "cacheReadTokens": 23040,
+        "cacheWriteTokens": 0,
+        "outputTokens": 212,
+        "reasoningTokens": 52,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 58,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:39:31.465Z",
+      "duration_ms": 4532,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2605,
+        "cacheReadTokens": 24448,
+        "cacheWriteTokens": 0,
+        "outputTokens": 451,
+        "reasoningTokens": 277,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 59,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:39:36.023Z",
+      "duration_ms": 4721,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 297,
+        "cacheReadTokens": 27008,
+        "cacheWriteTokens": 0,
+        "outputTokens": 487,
+        "reasoningTokens": 398,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 60,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:39:40.760Z",
+      "duration_ms": 7294,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1303,
+        "cacheReadTokens": 27264,
+        "cacheWriteTokens": 0,
+        "outputTokens": 432,
+        "reasoningTokens": 312,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 61,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:39:48.077Z",
+      "duration_ms": 1115,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 103,
+        "cacheReadTokens": 5376,
+        "cacheWriteTokens": 0,
+        "outputTokens": 50,
+        "reasoningTokens": 5,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 62,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:39:49.195Z",
+      "duration_ms": 1398,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1526,
+        "cacheReadTokens": 5376,
+        "cacheWriteTokens": 0,
+        "outputTokens": 41,
+        "reasoningTokens": 12,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 63,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:39:50.600Z",
+      "duration_ms": 1606,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2478,
+        "cacheReadTokens": 4480,
+        "cacheWriteTokens": 0,
+        "outputTokens": 25,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 64,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:39:52.212Z",
+      "duration_ms": 1559,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1063,
+        "cacheReadTokens": 6848,
+        "cacheWriteTokens": 0,
+        "outputTokens": 109,
+        "reasoningTokens": 7,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 65,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:39:53.773Z",
+      "duration_ms": 2155,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2188,
+        "cacheReadTokens": 6784,
+        "cacheWriteTokens": 0,
+        "outputTokens": 157,
+        "reasoningTokens": 64,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 66,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:39:55.932Z",
+      "duration_ms": 868,
+      "status": 0,
+      "error": "This operation was aborted"
+    },
+    {
+      "id": 67,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:41:55.224Z",
+      "duration_ms": 2888,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2817,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 75,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 68,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:41:58.429Z",
+      "duration_ms": 5132,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 3805,
+        "cacheReadTokens": 2816,
+        "cacheWriteTokens": 0,
+        "outputTokens": 443,
+        "reasoningTokens": 258,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 69,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:42:03.587Z",
+      "duration_ms": 3174,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1234,
+        "cacheReadTokens": 6528,
+        "cacheWriteTokens": 0,
+        "outputTokens": 113,
+        "reasoningTokens": 29,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 70,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:42:06.796Z",
+      "duration_ms": 5113,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 8861,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 398,
+        "reasoningTokens": 297,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 71,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:42:11.929Z",
+      "duration_ms": 3738,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2140,
+        "cacheReadTokens": 7680,
+        "cacheWriteTokens": 0,
+        "outputTokens": 358,
+        "reasoningTokens": 233,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 72,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:42:15.693Z",
+      "duration_ms": 3787,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 792,
+        "cacheReadTokens": 9728,
+        "cacheWriteTokens": 0,
+        "outputTokens": 221,
+        "reasoningTokens": 68,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 73,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:42:19.516Z",
+      "duration_ms": 3523,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 240,
+        "cacheReadTokens": 10496,
+        "cacheWriteTokens": 0,
+        "outputTokens": 290,
+        "reasoningTokens": 70,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 74,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:42:23.072Z",
+      "duration_ms": 2736,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1356,
+        "cacheReadTokens": 10624,
+        "cacheWriteTokens": 0,
+        "outputTokens": 223,
+        "reasoningTokens": 36,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 75,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:42:25.845Z",
+      "duration_ms": 8819,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 3252,
+        "cacheReadTokens": 11904,
+        "cacheWriteTokens": 0,
+        "outputTokens": 851,
+        "reasoningTokens": 669,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 76,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:42:34.685Z",
+      "duration_ms": 1338,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 5486,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 51,
+        "reasoningTokens": 6,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 77,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:42:36.029Z",
+      "duration_ms": 2638,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1533,
+        "cacheReadTokens": 5376,
+        "cacheWriteTokens": 0,
+        "outputTokens": 60,
+        "reasoningTokens": 15,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 78,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:42:38.674Z",
+      "duration_ms": 2807,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 380,
+        "cacheReadTokens": 6784,
+        "cacheWriteTokens": 0,
+        "outputTokens": 162,
+        "reasoningTokens": 8,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 79,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:42:41.483Z",
+      "duration_ms": 1331,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 3892,
+        "cacheReadTokens": 7040,
+        "cacheWriteTokens": 0,
+        "outputTokens": 47,
+        "reasoningTokens": 16,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 80,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:42:42.825Z",
+      "duration_ms": 2700,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 310,
+        "cacheReadTokens": 10816,
+        "cacheWriteTokens": 0,
+        "outputTokens": 119,
+        "reasoningTokens": 99,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 81,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:42:45.544Z",
+      "duration_ms": 3868,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 344,
+        "cacheReadTokens": 11008,
+        "cacheWriteTokens": 0,
+        "outputTokens": 329,
+        "reasoningTokens": 309,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 82,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:42:49.414Z",
+      "duration_ms": 4016,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2267,
+        "cacheReadTokens": 11264,
+        "cacheWriteTokens": 0,
+        "outputTokens": 316,
+        "reasoningTokens": 288,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 83,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:42:53.433Z",
+      "duration_ms": 1288,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 130,
+        "cacheReadTokens": 13440,
+        "cacheWriteTokens": 0,
+        "outputTokens": 50,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 84,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:42:54.769Z",
+      "duration_ms": 3050,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 164,
+        "cacheReadTokens": 13504,
+        "cacheWriteTokens": 0,
+        "outputTokens": 63,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 85,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:42:57.830Z",
+      "duration_ms": 1143,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 193,
+        "cacheReadTokens": 13568,
+        "cacheWriteTokens": 0,
+        "outputTokens": 22,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 86,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:42:58.979Z",
+      "duration_ms": 1128,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 108,
+        "cacheReadTokens": 13696,
+        "cacheWriteTokens": 0,
+        "outputTokens": 12,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 87,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:43:00.115Z",
+      "duration_ms": 4196,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 131,
+        "cacheReadTokens": 13696,
+        "cacheWriteTokens": 0,
+        "outputTokens": 324,
+        "reasoningTokens": 295,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 88,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:43:04.313Z",
+      "duration_ms": 3190,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 251,
+        "cacheReadTokens": 13760,
+        "cacheWriteTokens": 0,
+        "outputTokens": 423,
+        "reasoningTokens": 310,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 89,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:43:07.507Z",
+      "duration_ms": 5458,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 255,
+        "cacheReadTokens": 13888,
+        "cacheWriteTokens": 0,
+        "outputTokens": 549,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 90,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-16T16:43:12.966Z",
+      "duration_ms": 1886,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 793,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 193,
+        "reasoningTokens": 21,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 91,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:43:26.697Z",
+      "duration_ms": 5873,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1977,
+        "cacheReadTokens": 15104,
+        "cacheWriteTokens": 0,
+        "outputTokens": 397,
+        "reasoningTokens": 307,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 92,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:43:32.729Z",
+      "duration_ms": 5903,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2312,
+        "cacheReadTokens": 17024,
+        "cacheWriteTokens": 0,
+        "outputTokens": 598,
+        "reasoningTokens": 430,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 93,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:43:38.685Z",
+      "duration_ms": 6188,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 722,
+        "cacheReadTokens": 19328,
+        "cacheWriteTokens": 0,
+        "outputTokens": 537,
+        "reasoningTokens": 377,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 94,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:43:47.070Z",
+      "duration_ms": 16884,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 209676,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 3943,
+        "reasoningTokens": 3784,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 95,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:44:04.165Z",
+      "duration_ms": 13166,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1016,
+        "cacheReadTokens": 209664,
+        "cacheWriteTokens": 0,
+        "outputTokens": 3723,
+        "reasoningTokens": 3662,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 96,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:44:17.346Z",
+      "duration_ms": 29938,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 580,
+        "cacheReadTokens": 210560,
+        "cacheWriteTokens": 0,
+        "outputTokens": 9140,
+        "reasoningTokens": 9023,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 97,
+      "role": "planner",
+      "model": "pro",
+      "started_at": "2026-10-16T16:44:47.308Z",
+      "duration_ms": 3981,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 599,
+        "cacheReadTokens": 211072,
+        "cacheWriteTokens": 0,
+        "outputTokens": 975,
+        "reasoningTokens": 118,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 98,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:50:00.464Z",
+      "duration_ms": 2539,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 5654,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 40,
+        "reasoningTokens": 6,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 99,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:50:03.157Z",
+      "duration_ms": 1926,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 9848,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 139,
+        "reasoningTokens": 12,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 100,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:50:05.088Z",
+      "duration_ms": 2511,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 7818,
+        "cacheReadTokens": 5568,
+        "cacheWriteTokens": 0,
+        "outputTokens": 55,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 101,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:50:07.601Z",
+      "duration_ms": 14418,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 820,
+        "cacheReadTokens": 13312,
+        "cacheWriteTokens": 0,
+        "outputTokens": 1817,
+        "reasoningTokens": 1092,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 102,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:50:22.025Z",
+      "duration_ms": 2145,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 878,
+        "cacheReadTokens": 14016,
+        "cacheWriteTokens": 0,
+        "outputTokens": 84,
+        "reasoningTokens": 71,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 103,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:50:24.228Z",
+      "duration_ms": 1273,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 149,
+        "cacheReadTokens": 14784,
+        "cacheWriteTokens": 0,
+        "outputTokens": 14,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 104,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:50:25.503Z",
+      "duration_ms": 4331,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 7569,
+        "cacheReadTokens": 9728,
+        "cacheWriteTokens": 0,
+        "outputTokens": 511,
+        "reasoningTokens": 120,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 105,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:50:29.837Z",
+      "duration_ms": 1968,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 635,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 188,
+        "reasoningTokens": 41,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 106,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:52:52.118Z",
+      "duration_ms": 2449,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1250,
+        "cacheReadTokens": 4480,
+        "cacheWriteTokens": 0,
+        "outputTokens": 83,
+        "reasoningTokens": 6,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 107,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:52:54.568Z",
+      "duration_ms": 1491,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 7995,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 68,
+        "reasoningTokens": 34,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 108,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:52:56.062Z",
+      "duration_ms": 4222,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 3359,
+        "cacheReadTokens": 5632,
+        "cacheWriteTokens": 0,
+        "outputTokens": 308,
+        "reasoningTokens": 263,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 109,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:53:00.418Z",
+      "duration_ms": 4149,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1635,
+        "cacheReadTokens": 7872,
+        "cacheWriteTokens": 0,
+        "outputTokens": 480,
+        "reasoningTokens": 332,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 110,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:53:04.569Z",
+      "duration_ms": 1209,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 772,
+        "cacheReadTokens": 8896,
+        "cacheWriteTokens": 0,
+        "outputTokens": 20,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 111,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:53:05.783Z",
+      "duration_ms": 3698,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 437,
+        "cacheReadTokens": 9408,
+        "cacheWriteTokens": 0,
+        "outputTokens": 342,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 112,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:53:09.486Z",
+      "duration_ms": 1808,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 485,
+        "cacheReadTokens": 9728,
+        "cacheWriteTokens": 0,
+        "outputTokens": 104,
+        "reasoningTokens": 52,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 113,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:53:11.296Z",
+      "duration_ms": 6189,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1343,
+        "cacheReadTokens": 9600,
+        "cacheWriteTokens": 0,
+        "outputTokens": 571,
+        "reasoningTokens": 96,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 114,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:53:17.490Z",
+      "duration_ms": 1646,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 719,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 139,
+        "reasoningTokens": 14,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 115,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:56:00.372Z",
+      "duration_ms": 2473,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1936,
+        "cacheReadTokens": 4480,
+        "cacheWriteTokens": 0,
+        "outputTokens": 35,
+        "reasoningTokens": 6,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 116,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:56:03.001Z",
+      "duration_ms": 7908,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 4265,
+        "cacheReadTokens": 6336,
+        "cacheWriteTokens": 0,
+        "outputTokens": 481,
+        "reasoningTokens": 384,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 117,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:56:10.914Z",
+      "duration_ms": 14250,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2608,
+        "cacheReadTokens": 10496,
+        "cacheWriteTokens": 0,
+        "outputTokens": 828,
+        "reasoningTokens": 805,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 118,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:56:25.169Z",
+      "duration_ms": 8970,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 328,
+        "cacheReadTokens": 12992,
+        "cacheWriteTokens": 0,
+        "outputTokens": 494,
+        "reasoningTokens": 475,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 119,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:56:34.143Z",
+      "duration_ms": 15610,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 444,
+        "cacheReadTokens": 13248,
+        "cacheWriteTokens": 0,
+        "outputTokens": 924,
+        "reasoningTokens": 899,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 120,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:56:49.757Z",
+      "duration_ms": 1233,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 363,
+        "cacheReadTokens": 13568,
+        "cacheWriteTokens": 0,
+        "outputTokens": 13,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 121,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:56:50.993Z",
+      "duration_ms": 14344,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 505,
+        "cacheReadTokens": 13824,
+        "cacheWriteTokens": 0,
+        "outputTokens": 1122,
+        "reasoningTokens": 938,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 122,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:57:05.337Z",
+      "duration_ms": 7445,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 315,
+        "cacheReadTokens": 14208,
+        "cacheWriteTokens": 0,
+        "outputTokens": 330,
+        "reasoningTokens": 100,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 123,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:57:12.782Z",
+      "duration_ms": 2394,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 474,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 126,
+        "reasoningTokens": 21,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 124,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:57:18.066Z",
+      "duration_ms": 1779,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1044,
+        "cacheReadTokens": 4480,
+        "cacheWriteTokens": 0,
+        "outputTokens": 98,
+        "reasoningTokens": 7,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 125,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:57:19.846Z",
+      "duration_ms": 1808,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2204,
+        "cacheReadTokens": 5440,
+        "cacheWriteTokens": 0,
+        "outputTokens": 56,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 126,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:57:21.701Z",
+      "duration_ms": 1525,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 3118,
+        "cacheReadTokens": 7552,
+        "cacheWriteTokens": 0,
+        "outputTokens": 41,
+        "reasoningTokens": 7,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 127,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:57:23.230Z",
+      "duration_ms": 11153,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1615,
+        "cacheReadTokens": 10560,
+        "cacheWriteTokens": 0,
+        "outputTokens": 1190,
+        "reasoningTokens": 322,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 128,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:57:34.387Z",
+      "duration_ms": 10286,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 980,
+        "cacheReadTokens": 12096,
+        "cacheWriteTokens": 0,
+        "outputTokens": 1435,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 129,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:57:44.676Z",
+      "duration_ms": 32745,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1570,
+        "cacheReadTokens": 12992,
+        "cacheWriteTokens": 0,
+        "outputTokens": 2316,
+        "reasoningTokens": 114,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 130,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:58:17.427Z",
+      "duration_ms": 2357,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2372,
+        "cacheReadTokens": 14464,
+        "cacheWriteTokens": 0,
+        "outputTokens": 127,
+        "reasoningTokens": 46,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 131,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:58:19.790Z",
+      "duration_ms": 5094,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 160,
+        "cacheReadTokens": 16768,
+        "cacheWriteTokens": 0,
+        "outputTokens": 393,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 132,
+      "role": "worker",
+      "model": "worker",
+      "started_at": "2026-10-17T03:58:24.886Z",
+      "duration_ms": 4598,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 637,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 394,
+        "reasoningTokens": 20,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 133,
+      "role": "qa",
+      "model": "worker",
+      "started_at": "2026-10-17T03:58:30.293Z",
+      "duration_ms": 5064,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 5228,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 343,
+        "reasoningTokens": 239,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 134,
+      "role": "qa",
+      "model": "worker",
+      "started_at": "2026-10-17T03:58:35.359Z",
+      "duration_ms": 1735,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1897,
+        "cacheReadTokens": 5120,
+        "cacheWriteTokens": 0,
+        "outputTokens": 64,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 135,
+      "role": "qa",
+      "model": "worker",
+      "started_at": "2026-10-17T03:58:37.099Z",
+      "duration_ms": 1514,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1967,
+        "cacheReadTokens": 6912,
+        "cacheWriteTokens": 0,
+        "outputTokens": 31,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 136,
+      "role": "qa",
+      "model": "worker",
+      "started_at": "2026-10-17T03:58:38.617Z",
+      "duration_ms": 1904,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 3097,
+        "cacheReadTokens": 8768,
+        "cacheWriteTokens": 0,
+        "outputTokens": 99,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 137,
+      "role": "qa",
+      "model": "worker",
+      "started_at": "2026-10-17T03:58:40.526Z",
+      "duration_ms": 7920,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 4130,
+        "cacheReadTokens": 11776,
+        "cacheWriteTokens": 0,
+        "outputTokens": 585,
+        "reasoningTokens": 263,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 138,
+      "role": "qa",
+      "model": "worker",
+      "started_at": "2026-10-17T04:00:37.014Z",
+      "duration_ms": 2175,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 5918,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 118,
+        "reasoningTokens": 14,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 139,
+      "role": "qa",
+      "model": "worker",
+      "started_at": "2026-10-17T04:00:39.199Z",
+      "duration_ms": 1277,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 2557,
+        "cacheReadTokens": 5824,
+        "cacheWriteTokens": 0,
+        "outputTokens": 64,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 140,
+      "role": "qa",
+      "model": "worker",
+      "started_at": "2026-10-17T04:00:40.482Z",
+      "duration_ms": 1950,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 10684,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 116,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 141,
+      "role": "qa",
+      "model": "worker",
+      "started_at": "2026-10-17T04:00:42.445Z",
+      "duration_ms": 1759,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 6209,
+        "cacheReadTokens": 10560,
+        "cacheWriteTokens": 0,
+        "outputTokens": 62,
+        "reasoningTokens": 16,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 142,
+      "role": "qa",
+      "model": "worker",
+      "started_at": "2026-10-17T04:00:44.591Z",
+      "duration_ms": 2008,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 13083,
+        "cacheReadTokens": 8256,
+        "cacheWriteTokens": 0,
+        "outputTokens": 87,
+        "reasoningTokens": 57,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 143,
+      "role": "qa",
+      "model": "worker",
+      "started_at": "2026-10-17T04:00:46.608Z",
+      "duration_ms": 7158,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1285,
+        "cacheReadTokens": 21248,
+        "cacheWriteTokens": 0,
+        "outputTokens": 938,
+        "reasoningTokens": 0,
+        "webSearches": 0
+      }
+    },
+    {
+      "id": 144,
+      "role": "qa",
+      "model": "worker",
+      "started_at": "2026-10-17T04:00:53.772Z",
+      "duration_ms": 6412,
+      "status": 200,
+      "usage": {
+        "uncachedInputTokens": 1205,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 1004,
+        "reasoningTokens": 66,
+        "webSearches": 0
+      },
+      "role_note": "QA report-formatting repair; initial relay classifier missed its explicit Task role label."
+    }
+  ]
+}

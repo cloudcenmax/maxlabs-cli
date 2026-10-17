@@ -1,16 +1,16 @@
-                                       
 
-                                           
-                                                        
 
-                                     
-                                   
-                 
-                       
-                
- 
 
-                                                                                                                                          
+
+
+
+
+
+
+
+
+
+
 
 const readOnlyCommands = new Set([
   "ls", "cat", "head", "tail", "wc", "file", "stat", "tree", "du", "df", "realpath", "basename", "dirname", "readlink", "pwd", "find", "fd",
@@ -34,6 +34,7 @@ const destructive = new Map([
 ]);
 
 export class PermissionGuard {
+  #queue                   = Promise.resolve();
            #always = new Set        ();
            decisions                                                                 = [];
   mode      ;
@@ -45,6 +46,12 @@ export class PermissionGuard {
   }
 
   async permit(tool      , arguments_                         )                              {
+    const result = this.#queue.then(() => this.#permit(tool, arguments_));
+    this.#queue = result.catch(() => {});
+    return result;
+  }
+
+  async #permit(tool      , arguments_                         )                              {
     const decision = decide(this.mode, tool, arguments_);
     if (decision.effect === "allow") {
       this.decisions.push({ ...decision, tool: tool.schema.name, granted: true });

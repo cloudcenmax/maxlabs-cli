@@ -1,24 +1,28 @@
-                                                       
-                                                              
-                                                                    
-                                                                            
+
+
+
+
 import { emptyUsage } from "./types.js";
-                                               
 
-                             
-                                     
-                              
-                                                                                       
-                               
- 
 
-                             
-               
-                
-                    
-               
-                      
- 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 const toolOrder = ["read", "write", "edit", "glob", "grep", "bash", "webfetch", "delegate"];
 
@@ -47,7 +51,7 @@ export class Agent {
   }
 
   async run(userText        , steering               , signal              )                      {
-    this.log.ensureSystem(systemPrompt(this.guard.mode));
+    this.log.ensureSystem(systemPrompt(this.guard.mode) + (this.hooks.systemInstructions?.() || ""));
     if (userText.trim()) this.log.append("user", { role: "user", content: [{ type: "text", text: userText.trim() }], source: "user" });
     const result             = { text: "", steps: 0, toolCalls: 0, usage: emptyUsage(), webSearches: 0 };
     let searchesLeft = this.settings.webSearchUses;
@@ -60,7 +64,7 @@ export class Agent {
       const response = await this.#retry(() => this.transport.complete({
         model: this.settings.model,
         messages: this.log.messages(),
-        tools: this.tools.schemas(toolOrder),
+        tools: this.tools.schemas(toolOrder).filter(tool => this.hooks.visibleTool?.(tool.name) !== false),
         maxTokens: this.settings.maxTokens,
         thinking: this.settings.thinking,
         webSearch: this.settings.webSearch,
@@ -87,7 +91,7 @@ export class Agent {
         if (!tool) {
           toolResult = { text: `No tool named ${JSON.stringify(call.name)} is available.`, isError: true };
         } else {
-          const denied = await this.guard.permit(tool, arguments_);
+          const denied = this.hooks.beforeTool?.(call.name, arguments_) || await this.guard.permit(tool, arguments_);
           toolResult = denied ? { text: `Permission denied: ${denied}`, isError: true } : await tool.execute(arguments_, signal);
         }
         result.toolCalls++;
@@ -100,7 +104,9 @@ export class Agent {
   }
 
   #appendTool(callId        , result            )       {
-    this.log.append("tool", { role: "tool", content: [{ type: "tool_result", callId, text: result.text, isError: result.isError }], source: "tool" });
+    const limit = this.hooks.toolResultLimit?.() || 0;
+    const text = limit && result.text.length > limit ? result.text.slice(0, limit) + "\n[truncated by context budget; retrieve targeted line ranges or artifact fields before relying on omitted content]" : result.text;
+    this.log.append("tool", { role: "tool", content: [{ type: "tool_result", callId, text, isError: result.isError }], source: "tool" });
   }
 
   #admitSteering(queue               )       {
@@ -124,7 +130,7 @@ export class Agent {
   }
 }
 
-function systemPrompt(mode                         )         {
+export function systemPrompt(mode                         )         {
   const modePolicy = mode === "plan"
     ? "Plan mode is active. Inspect freely, but do not modify files or run commands that change state."
     : mode === "auto"

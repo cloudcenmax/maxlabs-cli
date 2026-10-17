@@ -10,6 +10,7 @@
     "bin",
     "dist",
     "src",
+    "greenfield/*.json",
     "README.md"
   ],
   "scripts": {

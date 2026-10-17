@@ -749,3 +749,35 @@ func TestCancellationIsCheckedPerStep(t *testing.T) {
 		t.Fatalf("the loop started %d model calls after cancellation, want 1", provider.calls)
 	}
 }
+
+func TestModelToolResultBudgetPreservesOriginalHookEvidence(t *testing.T) {
+	provider := &scripted{responses: []llm.Response{toolCallTurn("large", "echo", `{"text":"`+strings.Repeat("x", 10000)+`"}`), textTurn("done")}}
+	registry := tools.NewRegistry()
+	_ = registry.Register(echo{})
+	original := 0
+	a, err := agent.New(agent.Config{Assembly: assemble.Config{Model: "test", Identity: "test", Tools: registry.Schemas()}, Provider: provider, Tools: registry, MaxSteps: 3, MaxToolResultBytes: 100, OnToolResult: func(_ session.Block, result tools.Result) {
+		for _, b := range result.Content {
+			original += len(b.Text)
+		}
+	}}, session.New(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.Run(context.Background(), "inspect"); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, m := range provider.requests[1].Messages {
+		for _, b := range m.Content {
+			if b.Type == session.BlockToolResult {
+				found = true
+				if len(b.Text) > 300 || !strings.Contains(b.Text, "truncated by context budget") {
+					t.Fatal(b.Text)
+				}
+			}
+		}
+	}
+	if !found || original < 10000 {
+		t.Fatal(found, original)
+	}
+}

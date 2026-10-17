@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import process from "node:process";
 import { createInterface,                } from "node:readline";
-import { Agent } from "./agent.js";
+import { Agent, systemPrompt } from "./agent.js";
 import { defaultAuthStore, OAuthSession,                                         } from "./auth.js";
 import { defaultModel, resolveThinkingLevel } from "./commands.js";
 import {                      PermissionGuard,           } from "./permission.js";
@@ -9,7 +9,8 @@ import { Presentation, renderStartupBrand, StreamingMarkdown } from "./presentat
 import { SessionLog, SteeringQueue } from "./session.js";
 import { GatewayTransport } from "./transport.js";
 import { createTools, Workspace } from "./tools.js";
-                                                                       
+import { TeamStore, runApprovedTasks, environmentCommands, allowedCheck, createTeamChild, teamInstructions, teamTool } from "./greenfield.js";
+
 
 const ansi = process.stdout.isTTY;
 const ui = new Presentation(ansi);
@@ -19,23 +20,25 @@ function repaintSubmitted(text        )       {
   else process.stdout.write(`${ui.submittedPrompt(text)}\n\n`);
 }
 
-                   
-                  
-                    
-                
-                   
-                  
-                  
-                     
-                      
-             
-                                       
-                        
-                                      
-                    
-                   
-                
- 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 class InputRouter {
            rl           ;
@@ -84,7 +87,9 @@ class InputRouter {
       if (this.busy) {
         this.#busyTyping = false;
         if (line.trim()) {
-          if (line.trimStart().startsWith("/")) {
+          if (/^\/team\s+approve\b/.test(line.trim())) {
+            process.stdout.write("  Wait for the current turn to finish, inspect its artifacts, then approve the revision.\n");
+          } else if (line.trimStart().startsWith("/")) {
             this.#queued.push(line);
             process.stdout.write(`${ui.brand("  ↳ command queued")}  ${ui.tone("running after the current turn")}\n`);
           } else {
@@ -123,9 +128,13 @@ async function main()                {
   const options = parseOptions(process.argv.slice(2));
   if (options.demo) { await renderDemo(options); return; }
   const workspace = await Workspace.open(options.workspace);
+  const teamStore = new TeamStore(workspace);
+  let teamMode = options.team;
+  let teamWorkerModel = options.workerModel;
   const oauth = new OAuthSession(options.authUrl, options.oauthStore);
   const router = new InputRouter();
   const guard = new PermissionGuard(options.mode, async (tool, args, decision) => {
+    if (teamMode && tool === "webfetch") return "once";
     clearStatusForApproval?.();
     process.stdout.write(`\n${ui.brand("  ⏸  approval needed")}  ${ui.tone("the agent is waiting for your decision")}\n\n`);
     process.stdout.write(`      ${ui.bold(tool)} ${ui.tone(JSON.stringify(args).slice(0, 500))}\n\n`);
@@ -143,6 +152,7 @@ async function main()                {
     return "deny";
   });
   router.onToggleMode = () => {
+    teamMode = false;
     guard.mode = guard.mode === "plan" ? "act" : "plan";
     process.stdout.write(`\n${ui.modeNotice(guard.mode)}\n`);
   };
@@ -179,6 +189,14 @@ async function main()                {
     maxSteps: options.maxSteps,
   };
   const tools = createTools(workspace);
+  const workflow = teamTool(teamStore, createTeamChild(teamStore, transport, guard, settings, () => teamWorkerModel, (name, args, result) => agentHooks.onTool(name, args, result)), async (command, signal) => {
+    if (guard.mode === "plan" && !environmentCommands.includes(command)) return { text: "Plan mode refuses task execution", isError: true };
+    const tool = tools.get("bash") ;
+    const args = { command, timeout_ms: 300_000 };
+    const denied = allowedCheck(command) || environmentCommands.includes(command) ? undefined : await guard.permit(tool, args);
+    return denied ? { text: denied, isError: true } : tool.execute(args, signal);
+  });
+  tools.register(workflow);
   let delegationDepth = 0;
   tools.register({
     schema: {
@@ -227,7 +245,7 @@ async function main()                {
     if (!ansi || spinner || router.isTyping) return;
     spinner = setInterval(() => {
       const thinking = reasoningCharacters > 0 ? `${ui.thought(`✻ thinking ~${Math.floor(reasoningCharacters / 4)} tokens`)} · ` : "";
-      const mode = guard.mode === "plan" ? `${ui.bold(ui.brand("PLAN MODE"))} · shift+tab to exit` : `${guard.mode} · shift+tab`;
+      const mode = teamMode ? "Greenfield SDE Team · BETA" : guard.mode === "plan" ? `${ui.bold(ui.brand("PLAN MODE"))} · shift+tab to exit` : `${guard.mode} · shift+tab`;
       process.stdout.write(`\r\x1b[2K${thinking}${ui.brand(frames[frame++ % frames.length])} step ${step}/${settings.maxSteps} · think:${settings.thinking} · ${mode} · ctrl+c`);
     }, 80);
   };
@@ -269,7 +287,17 @@ async function main()                {
   };
   router.onBusyTypingEnd = startStatus;
   let streamStatusCleared = false;
+  let plannerFetches = 0;
   const agentHooks = {
+    toolResultLimit: () => teamMode ? 16_000 : 0,
+    systemInstructions: () => teamMode ? `\n\n${teamInstructions}` : "",
+    visibleTool: (name        ) => teamMode ? !["write", "edit", "bash", "delegate"].includes(name) : name !== "team",
+    beforeTool(name        ) {
+      if (teamMode && name === "webfetch" && ++plannerFetches > 6) return "Documentation budget reached (6 fetches per turn). Use saved evidence or record unknowns.";
+      if (!teamMode && name === "team") return "Enable Greenfield SDE Team (Beta) with /team first.";
+      if (teamMode && ["write", "edit", "bash", "delegate"].includes(name)) return "Greenfield planning uses team save/research/run; direct application mutation and unscoped delegation are disabled.";
+      return undefined;
+    },
     onStep(value) {
       step = value;
       streamStatusCleared = false;
@@ -324,7 +352,8 @@ async function main()                {
   const startupAccount = await oauth.activeAccount();
   await renderStartupBrand(ui, { model: settings.model, thinking: settings.thinking, auth: accountLabel(startupAccount) });
   process.stdout.write(`${ui.tone(workspace.root)}\n\n`);
-  process.stdout.write(`${ui.brand("Commands")}  ${ui.code("/account")} ${ui.code("/model")} ${ui.code("/think")} ${ui.code("/auto")} ${ui.code("/plan")} ${ui.code("/act")} ${ui.code("/web")} ${ui.code("/tools")} ${ui.code("/help")} ${ui.code("/exit")}\n`);
+  process.stdout.write(`${ui.brand("Commands")}  ${ui.code("/account")} ${ui.code("/model")} ${ui.code("/think")} ${ui.code("/auto")} ${ui.code("/plan")} ${ui.code("/act")} ${ui.code("/team")} ${ui.tone("Greenfield SDE Team · Beta")} ${ui.code("/web")} ${ui.code("/help")} ${ui.code("/exit")}\n`);
+  if (teamMode) process.stdout.write(`${ui.brand("Greenfield SDE Team (Beta)")} · Laravel · /team status · /team approve design|spec|release\n`);
   process.stdout.write(`${ui.tone("Shift+Tab toggles plan mode · type during work to steer the next operation")}\n\n`);
 
   try {
@@ -355,6 +384,17 @@ async function main()                {
     cancelPartialFlush();
     startStatus();
     try {
+      workflow.resetBudget();
+      plannerFetches = 0;
+      if (!teamMode && agent.log.events().some(e => e.message.content.some(b => b.type === "text" && b.text.includes("[team:instructions:v1]")))) text = "[Greenfield SDE Team is disabled for this turn. Follow ordinary CLI mode and tools.]\n\n" + text;
+      if (teamMode) {
+        agent.log.ensureSystem(systemPrompt(guard.mode));
+        if (!agent.log.events().some(e => e.message.content.some(b => b.type === "text" && b.text.includes("[team:instructions:v1]")))) {
+          agent.log.append("steering", { role: "user", content: [{ type: "text", text: "[team:instructions:v1] Greenfield workflow instructions are in the system policy for this mode." }], source: "user" });
+        }
+        const status = await teamStore.status();
+        text = `[Greenfield SDE Team (Beta): stage=${status.stage}, revision=${status.revision}. Use team status for artifacts and readiness. Pending approvals are user-owned.]\n\n${text}`;
+      }
       const result = await agent.run(text, router.steering, activeAbort.signal);
       cancelPartialFlush();
       clearStatus();
@@ -384,14 +424,36 @@ async function main()                {
     } finally { router.busy = false; activeAbort = undefined; }
   }
 
+  async function executeApproved()                {
+    router.busy = true; activeAbort = new AbortController();
+    try { process.stdout.write((await runApprovedTasks(teamStore, workflow, activeAbort.signal, () => { const directions = router.steering.drain(); if (directions.length) { for (const text of directions) agent.log.append("steering", { role: "user", content: [{ type: "text", text }], source: "user" }); throw new Error("Execution stopped before the next task to review the new direction: " + directions.join("\n") + ". Update and review affected contracts before continuing."); } })) + "\n"); }
+    finally { clearStatus(); router.busy = false; activeAbort = undefined; }
+  }
+
   async function command(text        )                   {
     const [name, ...arguments_] = text.trim().split(/\s+/);
     const argument = arguments_[0] || "";
     switch (name) {
+      case "/team": {
+        try {
+          const action = argument || "on";
+          if (action === "off") { teamMode = false; agent.log.ensureSystem(systemPrompt(guard.mode)); agent.log.append("steering", { role: "user", content: [{ type: "text", text: "Greenfield SDE Team workflow is disabled. Follow ordinary CLI instructions and permission mode until explicitly re-enabled." }], source: "user" }); process.stdout.write("Greenfield SDE Team disabled. Artifacts are preserved.\n"); }
+          else if (action === "on") { teamMode = true; if (guard.mode === "plan") guard.mode = "act"; process.stdout.write("Greenfield SDE Team (Beta) · Laravel. Describe your app to begin or resume.\n/team status · /team reference PATH · /team approve design|spec|release\n"); }
+          else if (action === "reference") { const status = await teamStore.attach(arguments_.slice(1).join(" ")); process.stdout.write(JSON.stringify(status.references, null, 2) + "\n"); }
+          else if (action === "approve") { const status = await teamStore.status(); const gate = arguments_[1]; const approved = await teamStore.approve(gate, status.gates[gate]); process.stdout.write(`Approved ${gate}. Stage: ${approved.stage}.\n`); if (gate !== "release") { teamMode = true; if (guard.mode === "plan") guard.mode = "act"; if (gate === "spec") await executeApproved(); else await runTurn(`Continue Greenfield SDE Team from the approved ${gate}. Use team status and follow the workflow.`); } }
+          else if (action === "run") { teamMode = true; if (guard.mode === "plan") guard.mode = "act"; await executeApproved(); }
+          else if (action === "status") { process.stdout.write(JSON.stringify(await teamStore.status(), null, 2) + "\n"); }
+          else if (action === "show") { const status = await teamStore.status(); const a = status.artifacts.find(a => a.id === arguments_[1]); if (!a) throw new Error("Unknown artifact ID"); process.stdout.write(JSON.stringify(await teamStore.content(a), null, 2) + "\n"); }
+          else if (action === "preview") { process.stdout.write(`Design prototype: ${await teamStore.preview()}\n`); }
+          else if (action === "model") { const id = arguments_[1] || ""; if (id && !models.some(m => m.id === id)) throw new Error("Choose an enabled model from /model"); teamWorkerModel = id; process.stdout.write(`Worker model: ${id || "same as planner"}\n`); }
+          else process.stdout.write("/team [on|off|run|status|show ID|reference PATH|approve design|spec|release]\n");
+        } catch (e) { process.stdout.write(`${ui.error(messageOf(e))}\n`); }
+        break;
+      }
       case "/exit": case "/quit": case "/q": return false;
-      case "/plan": guard.mode = "plan"; agent.log.append("steering", { role: "user", content: [{ type: "text", text: "Plan mode is now active; inspect freely but refuse all workspace mutations." }], source: "user" }); process.stdout.write(`${ui.modeNotice("plan")}\n`); break;
-      case "/act": guard.mode = "act"; agent.log.append("steering", { role: "user", content: [{ type: "text", text: "Act mode is now active; workspace changes require approval." }], source: "user" }); process.stdout.write(`${ui.modeNotice("act")}\n`); break;
-      case "/auto": guard.mode = "auto"; agent.log.append("steering", { role: "user", content: [{ type: "text", text: "Audited auto mode is now active; safe work may proceed, but risky drift still requires approval." }], source: "user" }); process.stdout.write(`${ui.modeNotice("auto")}\n`); break;
+      case "/plan": teamMode = false; guard.mode = "plan"; agent.log.append("steering", { role: "user", content: [{ type: "text", text: "Plan mode is now active; inspect freely but refuse all workspace mutations." }], source: "user" }); process.stdout.write(`${ui.modeNotice("plan")}\n`); break;
+      case "/act": teamMode = false; guard.mode = "act"; agent.log.append("steering", { role: "user", content: [{ type: "text", text: "Act mode is now active; workspace changes require approval." }], source: "user" }); process.stdout.write(`${ui.modeNotice("act")}\n`); break;
+      case "/auto": teamMode = false; guard.mode = "auto"; agent.log.append("steering", { role: "user", content: [{ type: "text", text: "Audited auto mode is now active; safe work may proceed, but risky drift still requires approval." }], source: "user" }); process.stdout.write(`${ui.modeNotice("auto")}\n`); break;
       case "/think": {
         const requested = resolveThinkingLevel(arguments_);
         if (!requested) process.stdout.write(`${ui.brand("thinking")} ${settings.thinking} ${ui.tone("(minimal, low, medium, high, default)")}\n`);
@@ -486,6 +548,14 @@ function help()       {
   /plan       inspect and plan; refuse mutations
   /act        ask before state-changing operations
   /auto       run audited safe work; still catch destructive drift
+  /team       Greenfield SDE Team (Beta), Laravel discovery through delivery
+  /team status  inspect stages, artifacts, task results and readiness errors
+  /team show ID  inspect a saved artifact before approval
+  /team preview  export the current interactive design preview
+  /team model ID  select an enabled model for implementation workers
+  /team reference PATH  attach a read-only design reference directory
+  /team approve design|spec|release  accept the current artifact revision
+  /team off   leave the workflow; preserve its artifacts
   /model ID   list or switch enabled Gateway models
   /think LEVEL  minimal, low, medium, high, or default
   /web MODE   off, auto, or always
@@ -580,9 +650,11 @@ function parseOptions(args          )          {
     webSearch: webSearch                        ,
     webSearchUses: Number(value("web-search-uses", "10")),
     thinking: thinking                             ,
-    maxTokens: Number(value("max-tokens", "4096")),
+    maxTokens: Number(value("max-tokens", flag("team") ? "16384" : "4096")),
     maxSteps: Number(value("max-steps", "100")),
     demo: flag("demo"),
+    team: flag("team"),
+    workerModel: value("worker-model"),
   };
 }
 

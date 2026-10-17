@@ -16,5 +16,5 @@ for (const entry of await readdir(source, { withFileTypes: true })) {
   const output = stripTypeScriptTypes(input, { mode: "strip", sourceUrl: `../src/${entry.name}` })
     .replaceAll(/(from\s+["'][^"']+)\.ts(["'])/g, "$1.js$2")
     .replaceAll(/(import\s+["'][^"']+)\.ts(["'])/g, "$1.js$2");
-  await writeFile(join(destination, entry.name.replace(/\.ts$/, ".js")), output);
+  await writeFile(join(destination, entry.name.replace(/\.ts$/, ".js")), output.replace(/^[ \t]+$/gm, ""));
 }

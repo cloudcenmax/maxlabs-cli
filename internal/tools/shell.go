@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -35,7 +37,14 @@ type BashTool struct {
 
 // NewBashTool returns a shell tool bound to a workspace.
 func NewBashTool(ws *Workspace) *BashTool {
-	return &BashTool{ws: ws, shell: "/bin/sh", timeout: defaultShellTimeout}
+	shell := "/bin/sh"
+	if runtime.GOOS == "windows" {
+		shell = os.Getenv("ComSpec")
+		if shell == "" {
+			shell = "cmd.exe"
+		}
+	}
+	return &BashTool{ws: ws, shell: shell, timeout: defaultShellTimeout}
 }
 
 // Definition implements Tool.
@@ -83,7 +92,11 @@ func (t *BashTool) Execute(ctx context.Context, raw json.RawMessage) (Result, er
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, t.shell, "-c", args.Command)
+	shellArgs := []string{"-c", args.Command}
+	if runtime.GOOS == "windows" {
+		shellArgs = []string{"/d", "/s", "/c", args.Command}
+	}
+	cmd := exec.CommandContext(runCtx, t.shell, shellArgs...)
 	cmd.Dir = t.ws.Root()
 
 	var combined bytes.Buffer

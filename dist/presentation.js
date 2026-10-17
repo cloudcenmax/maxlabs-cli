@@ -74,16 +74,16 @@ export class Presentation {
   }
 }
 
-                        
-                
-                   
-               
- 
 
-                       
-                   
-                               
- 
+
+
+
+
+
+
+
+
+
 
 export async function renderStartupBrand(
   presentation              ,

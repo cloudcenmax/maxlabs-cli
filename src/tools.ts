@@ -196,9 +196,11 @@ export function createTools(workspace: Workspace): ToolRegistry {
         const response = await fetch(url, { redirect: "error", signal: AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(20_000)]), headers: { "user-agent": "MaxLabs-CLI/0.1" } });
         if (!response.ok) return { text: `webfetch: HTTP ${response.status}`, isError: true };
         const contentType = response.headers.get("content-type") || "";
-        const raw = (await response.text()).slice(0, 250_000);
+        const received = await response.text();
+        const raw = received.slice(0, 250_000);
         const text = contentType.includes("html") ? stripHtml(raw) : raw;
-        return { text: `Fetched ${url.toString()} (HTTP ${response.status})\n\n<external-content>\n${text.slice(0, 80_000)}\n</external-content>` };
+        const truncated = received.length > 250_000 || text.length > 80_000;
+        return { text: `Fetched ${url.toString()} (HTTP ${response.status}${truncated ? ", truncated: retrieve targeted documentation before relying on missing fields" : ""})\n\n<external-content>\n${text.slice(0, 80_000)}\n</external-content>` };
       } catch (error) { return failure("webfetch", error); }
     },
   });

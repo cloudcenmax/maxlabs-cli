@@ -54,6 +54,9 @@ type Guard interface {
 
 // Config assembles an Agent.
 type Config struct {
+	// MaxToolResultBytes bounds model-visible tool text; hooks retain original evidence.
+	MaxToolResultBytes int
+
 	// Assembly is the session-stable half of every request.
 	Assembly assemble.Config
 
@@ -400,9 +403,13 @@ func (a *Agent) run(ctx context.Context, userText string, steering *SteeringQueu
 			}
 			turn.ToolCalls++
 
+			body := resultText(result)
+			if limit := a.cfg.MaxToolResultBytes; limit > 0 && len(body) > limit {
+				body = body[:limit] + "\n[truncated by context budget; retrieve targeted line ranges or artifact fields before relying on omitted content]"
+			}
 			if _, err := a.log.Append(session.EventToolResult, session.Message{
 				Role:    session.RoleTool,
-				Content: []session.Block{session.ToolResult(call.CallID, result.IsError, resultText(result))},
+				Content: []session.Block{session.ToolResult(call.CallID, result.IsError, body)},
 				Source:  "tool:" + call.Name,
 			}, session.AppendOp()); err != nil {
 				return turn, fmt.Errorf("agent: recording a tool result: %w", err)

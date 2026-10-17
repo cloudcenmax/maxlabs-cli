@@ -34,6 +34,7 @@ const destructive = new Map([
 ]);
 
 export class PermissionGuard {
+  #queue: Promise<unknown> = Promise.resolve();
   readonly #always = new Set<string>();
   readonly decisions: Array<PermissionDecision & { tool: string; granted: boolean }> = [];
   mode: Mode;
@@ -45,6 +46,12 @@ export class PermissionGuard {
   }
 
   async permit(tool: Tool, arguments_: Record<string, unknown>): Promise<string | undefined> {
+    const result = this.#queue.then(() => this.#permit(tool, arguments_));
+    this.#queue = result.catch(() => {});
+    return result;
+  }
+
+  async #permit(tool: Tool, arguments_: Record<string, unknown>): Promise<string | undefined> {
     const decision = decide(this.mode, tool, arguments_);
     if (decision.effect === "allow") {
       this.decisions.push({ ...decision, tool: tool.schema.name, granted: true });

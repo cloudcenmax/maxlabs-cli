@@ -1,0 +1,94 @@
+package greenfield
+
+import (
+	"censi/harness/internal/session"
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+// RunApproved dispatches the checked DAG without coordinator inference. It stops
+// at the first failure; retry/reapproval stays an explicit client operation.
+func (r *Runtime) RunApproved(ctx context.Context) (string, int, error) {
+	lines := []string{}
+	count := 0
+	for count < 8 {
+		if err := ctx.Err(); err != nil {
+			return strings.Join(lines, "\n"), count, err
+		}
+		if r.BeforeDispatch != nil {
+			if err := r.BeforeDispatch(); err != nil {
+				return strings.Join(lines, "\n"), count, err
+			}
+		}
+		status, err := r.Store.Status(nil)
+		if err != nil {
+			return "", count, err
+		}
+		if len(status.Errors) > 0 {
+			return "", count, fmt.Errorf("resolve readiness errors: %s", strings.Join(status.Errors, "; "))
+		}
+		if len(status.Ready) == 0 {
+			break
+		}
+		id := status.Ready[0]
+		raw, _ := json.Marshal(map[string]string{"action": "run", "id": id})
+		result, err := r.Execute(ctx, raw)
+		if r.OnTool != nil {
+			r.OnTool(session.ToolCall(fmt.Sprintf("dispatch-%d", count), "team", raw), result)
+		}
+		count++
+		if err != nil {
+			return "", count, err
+		}
+		if result.IsError {
+			return "", count, fmt.Errorf("task %s failed; dependent tasks were not run.\n%s", id, resultText(result))
+		}
+		lines = append(lines, "Verified "+id+" with all approved checks.")
+	}
+	status, err := r.Store.Status(nil)
+	if err != nil {
+		return "", count, err
+	}
+	allPassed, hasTasks, hasRelease := true, false, false
+	verification := []any{}
+	var setup any = "See approved specification deployment instructions."
+	for _, a := range status.Artifacts {
+		if a.Kind == "release" {
+			hasRelease = true
+		}
+		if a.Kind == "spec" {
+			if content, e := r.Store.Content(a); e == nil {
+				setup = content["deployment"]
+			}
+		}
+		if a.Kind == "task" {
+			hasTasks = true
+			run := status.Runs[a.ID]
+			if run == nil || run.Status != "passed" {
+				allPassed = false
+				continue
+			}
+			checks := []any{}
+			for _, check := range run.Checks {
+				checks = append(checks, map[string]any{"command": check.Command, "passed": check.Passed})
+			}
+			verification = append(verification, map[string]any{"task": a.ID, "attempts": run.Attempts, "checks": checks})
+		}
+	}
+	if hasTasks && allPassed {
+		if !hasRelease {
+			_, err = r.Store.Save("release", "verified-delivery", map[string]any{"summary": "All approved implementation and independent QA tasks passed their runner checks.", "setup": setup, "verification": verification, "limitations": []any{"No deployment or publication performed.", "Browser, visual, accessibility and external integration testing are only established by separately recorded evidence; passing configured checks alone does not prove them."}})
+			if err != nil {
+				return "", count, err
+			}
+		}
+		lines = append(lines, "All tasks passed. Review the release artifact and inspect the application before accepting delivery.")
+	} else if len(status.Ready) > 0 {
+		lines = append(lines, "Batch limit reached. Continue approved tasks to run the next batch.")
+	} else {
+		return "", count, fmt.Errorf("no ready tasks; inspect approvals, failed attempts and dependencies")
+	}
+	return strings.Join(lines, "\n"), count, nil
+}

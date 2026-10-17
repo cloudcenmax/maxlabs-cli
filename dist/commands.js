@@ -1,4 +1,4 @@
-                                                           
+
 
 export const thinkingLevels                              = ["minimal", "low", "medium", "high", "default"];
 
