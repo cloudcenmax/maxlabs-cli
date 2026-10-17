@@ -65,6 +65,7 @@ type ReviewTool struct {
 // ReviewDiff is one file-level patch. Lines are kept in their original order;
 // Kind uses add, del, same, or gap.
 type ReviewDiff struct {
+	CallID  string           `json:"callId,omitempty"`
 	Target  string           `json:"target"`
 	Added   int              `json:"added"`
 	Removed int              `json:"removed"`

@@ -26,6 +26,7 @@ func TestReviewsReplaceRunningRecordWithTerminalOutcome(t *testing.T) {
 		TurnID: "turn-1", AssistantSeq: 4, Status: "completed",
 		Verification: store.ReviewVerification{Status: "passed", Output: "ok"},
 		Summary:      store.ReviewSummary{FilesChanged: 1},
+		Diffs:        []store.ReviewDiff{{CallID: "edit-1", Target: "app.php", Added: 1}},
 	}); err != nil {
 		t.Fatalf("append completed: %v", err)
 	}
@@ -40,6 +41,9 @@ func TestReviewsReplaceRunningRecordWithTerminalOutcome(t *testing.T) {
 	got := reviews[0]
 	if got.Status != "completed" || got.AssistantSeq != 4 || got.Verification.Status != "passed" {
 		t.Fatalf("review = %+v", got)
+	}
+	if len(got.Diffs) != 1 || got.Diffs[0].CallID != "edit-1" {
+		t.Fatal("diff lost its edit association", got.Diffs)
 	}
 
 	// Review sidecars are not conversations. A crashed turn can have a running
