@@ -213,7 +213,7 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (tools.Result, 
 	assembly.Model = firstNonEmpty(in.Model, t.cfg.Model, t.cfg.Assembly.Model)
 	assembly.ReasoningEffort = firstNonEmpty(in.Thinking, t.cfg.Thinking, t.cfg.Assembly.ReasoningEffort)
 
-	child, err := agent.New(agent.Config{
+	child, err := agent.New(agent.Config{InputSource: "runner",
 		Assembly:      assembly,
 		Provider:      t.cfg.Provider,
 		Tools:         registry,
@@ -236,6 +236,9 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (tools.Result, 
 	}
 
 	turn, runErr := child.Run(ctx, in.Prompt)
+	if turn.ApprovalRequired != nil {
+		return tools.Result{}, turn.ApprovalRequired
+	}
 
 	text := turn.Text
 	if text == "" && runErr != nil {

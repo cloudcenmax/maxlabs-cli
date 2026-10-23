@@ -104,7 +104,7 @@ type Policy struct {
 	PlanMode bool
 
 	// Auto consults the auditor before asking, so recognised read-only work runs
-	// unattended and everything else still stops.
+	// unattended; other Bash commands can receive an isolated model review.
 	//
 	// It is a separate axis from the file sandbox, which decides what a process
 	// can do. This decides when a person is asked. Keeping them apart means
@@ -112,6 +112,10 @@ type Policy struct {
 	// worst an over-eager rule here can produce is a question that did not need
 	// asking.
 	Auto bool
+
+	// CommandReviewer is an isolated, tool-free second opinion for commands
+	// not covered by deterministic project rules.
+	CommandReviewer func(context.Context, json.RawMessage, audit.Transcript) audit.ReviewResult
 
 	// ProjectCommand evaluates literal commands against the assigned workspace.
 	// It is supplied by the host so setup, delegates and workers share scope.
@@ -152,10 +156,12 @@ func (p Policy) Decide(req Request) (Effect, string) {
 		// auditor into it too.
 		decision := audit.Assess(req.Tool, req.Arguments, req.Transcript)
 
-		// A refusal is not a question. Offering it as one gives a person a
-		// choice whose only safe answer is no, and a tired reader eventually
-		// says yes - so the refusal is the control, not the prompt.
+		// Bash containing credentials still receives an authorization review when
+		// available. The reviewer redacts credential values before making its call.
 		if decision.RefusedNow() {
+			if req.Tool == "bash" && p.CommandReviewer != nil {
+				return Ask, decision.Explain()
+			}
 			return Deny, decision.Explain()
 		}
 		if req.Tool == "bash" && p.ProjectCommand != nil {
@@ -273,7 +279,7 @@ func (g *Guard) Permit(ctx context.Context, tool string, args json.RawMessage, r
 	// still wins: a session approval given in normal mode must not let a write
 	// through while the user believes they are planning.
 	if !policy.PlanMode {
-		if rememberedAllow && !req.OneTimeOnly && !(policy.Auto && policy.ProjectCommand != nil && tool == "bash") {
+		if rememberedAllow && !req.OneTimeOnly && !(policy.Auto && (policy.ProjectCommand != nil || policy.CommandReviewer != nil) && tool == "bash") {
 			g.record(Outcome{Effect: Allow, Reason: "approved earlier in this session"})
 			return "", nil
 		}
@@ -284,6 +290,26 @@ func (g *Guard) Permit(ctx context.Context, tool string, args json.RawMessage, r
 	}
 
 	effect, reason := policy.Decide(req)
+	if effect == Ask && policy.Auto && !policy.PlanMode && tool == "bash" && policy.CommandReviewer != nil {
+		result := policy.CommandReviewer(ctx, args, transcript)
+		if result.Decision == "stop" {
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
+			g.record(Outcome{Effect: Deny, Reason: "MaxLabs command auditor stopped for explicit user approval"})
+			return "", audit.RequireApproval(args, result.ReviewedWorkspace)
+		}
+		if result.Allows() {
+			effect, reason = Allow, "MaxLabs command auditor approved: effects and scope match the user request"
+		} else {
+			reason = "MaxLabs command auditor needs confirmation: authorization, scope, or effects are uncertain"
+		}
+		req.OneTimeOnly = true
+		req.RiskReason = reason
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 
 	switch effect {
 	case Allow:

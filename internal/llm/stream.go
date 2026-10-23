@@ -118,7 +118,7 @@ func (p *HTTPProvider) Stream(ctx context.Context, req wire.Request, onDelta Del
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return Response{}, p.responseError("upstream", resp)
+		return Response{}, p.responseError("MaxLabs", resp)
 	}
 
 	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {

@@ -462,7 +462,7 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 	guard := &flexibleGuard{root: root, qa: qa, qaBefore: before, base: runtimeGuard{r}}
 	run.StepLimit = limit
 	workerLog := session.New(nil)
-	worker, err := agent.New(agent.Config{Assembly: assembly, Provider: r.Provider, Tools: registry, Guard: guard, MaxSteps: limit, MaxRetries: 2, MaxToolResultBytes: 16000, OnStep: func(step int) {
+	worker, err := agent.New(agent.Config{InputSource: "runner", Assembly: assembly, Provider: r.Provider, Tools: registry, Guard: guard, MaxSteps: limit, MaxRetries: 2, MaxToolResultBytes: 16000, OnStep: func(step int) {
 		run.StepsUsed = step
 		if limit >= 4 && step == limit-2 {
 			_, _ = workerLog.Append(session.EventUserMessage, session.Message{Role: session.RoleUser, Source: "runner", Content: []session.Block{session.Text("Runner budget notice: three model calls remain. Run final verification and return your report. If work remains, report concrete remaining work and blockers so a retry can continue from this branch.")}}, session.AppendOp())
@@ -501,7 +501,7 @@ func (r *Runtime) executeFlexibleJob(ctx context.Context, job flexibleJob) (*Run
 		repairAssembly := assembly
 		repairAssembly.Tools = nil
 		repairAssembly.MaxTokens = 2048
-		repair, e := agent.New(agent.Config{Assembly: repairAssembly, Provider: r.Provider, Tools: tools.NewRegistry(), MaxSteps: 1, OnUsage: usageHook}, session.New(nil))
+		repair, e := agent.New(agent.Config{InputSource: "runner", Assembly: repairAssembly, Provider: r.Provider, Tools: tools.NewRegistry(), MaxSteps: 1, OnUsage: usageHook}, session.New(nil))
 		if e == nil {
 			fixed, e := repair.Run(ctx, "Format this report as ONLY JSON with outcome (completed or blocked), summary, blockers. Preserve its outcome and blockers; if ambiguous use blocked. No tools. Report:\n"+truncate(turn.Text, 16000))
 			if e == nil {

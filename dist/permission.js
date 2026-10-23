@@ -1,3 +1,4 @@
+import { ApprovalRequired, allowsReview,                                                 } from "./command-auditor.js";
 
 
 
@@ -38,6 +39,7 @@ export class PermissionGuard {
            #always = new Set        ();
            decisions                                                                 = [];
   mode      ;
+  commandReviewer                  ;
            prompt                ;
            projectCommand                                        ;
 
@@ -47,13 +49,13 @@ export class PermissionGuard {
     this.projectCommand = projectCommand;
   }
 
-  async permit(tool      , arguments_                         )                              {
-    const result = this.#queue.then(() => this.#permit(tool, arguments_));
+  async permit(tool      , arguments_                         , context                       )                              {
+    const result = this.#queue.then(() => this.#permit(tool, arguments_, context));
     this.#queue = result.catch(() => {});
     return result;
   }
 
-  async #permit(tool      , arguments_                         )                              {
+  async #permit(tool      , arguments_                         , context                       )                              {
     let decision = decide(this.mode, tool, arguments_);
     if (this.mode === 'auto' && !tool.readOnly && tool.schema.name === 'bash' && this.projectCommand) {
       if (await this.projectCommand(String(arguments_.command || ''))) {
@@ -61,6 +63,17 @@ export class PermissionGuard {
         return;
       }
       decision={...decision,effect:'ask',reason:freshApprovalRisk('bash',arguments_)||'the command’s scope or effects require review',oneTimeOnly:true};
+    }
+    if (this.mode === 'auto' && tool.schema.name === 'bash' && decision.effect === 'ask' && this.commandReviewer) {
+      let result;
+      try { result = await this.commandReviewer(arguments_, context); } catch { /* confirmation fallback */ }
+      context?.signal?.throwIfAborted();
+      if (result?.decision === 'stop') {
+        this.decisions.push({ ...decision, effect:'deny', oneTimeOnly:true, reason:'MaxLabs command auditor stopped for explicit user approval', tool:'bash', granted:false });
+        throw new ApprovalRequired(String(arguments_.command || ''), result.reviewedWorkspace);
+      }
+      decision = { ...decision, effect: allowsReview(result) ? 'allow' : 'ask', oneTimeOnly: true,
+        reason: allowsReview(result) ? 'MaxLabs command auditor approved: effects and scope match the user request' : 'MaxLabs command auditor needs confirmation: authorization, scope, or effects are uncertain' };
     }
     if (decision.effect === "allow") {
       this.decisions.push({ ...decision, tool: tool.schema.name, granted: true });

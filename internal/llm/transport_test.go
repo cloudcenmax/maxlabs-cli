@@ -553,3 +553,20 @@ func TestGatewayErrorsAreConciseAcrossEndpoints(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceFailuresUsePublicBranding(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		srv := capturingServer(t, 503, `{"error":{"message":"MaxLabs is temporarily unavailable."}}`, nil, nil)
+		p := &llm.HTTPProvider{BaseURL: srv.URL, Model: "pro"}
+		var err error
+		if streaming {
+			_, err = p.Stream(context.Background(), sampleRequest(), nil)
+		} else {
+			_, err = p.Complete(context.Background(), sampleRequest())
+		}
+		srv.Close()
+		if err == nil || !strings.Contains(err.Error(), "MaxLabs returned 503") || strings.Contains(err.Error(), "upstream") {
+			t.Fatalf("streaming=%v: service failure must use public branding: %v", streaming, err)
+		}
+	}
+}

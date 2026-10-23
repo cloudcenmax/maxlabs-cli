@@ -3,6 +3,7 @@ package permission_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"censi/harness/internal/audit"
@@ -152,3 +153,55 @@ func indexOf(haystack, needle string) int {
 }
 
 var _ = audit.Safe
+
+func TestIsolatedReviewerOnlyApprovesUncertainAutoBash(t *testing.T) {
+	for _, mode := range []string{"auto", "act", "plan", "uncertain"} {
+		t.Run(mode, func(t *testing.T) {
+			p := &allowAll{}
+			calls := 0
+			guard := permission.New(permission.Policy{Auto: mode != "act", PlanMode: mode == "plan", ProjectCommand: func(string) bool { return false }, CommandReviewer: func(context.Context, json.RawMessage, audit.Transcript) audit.ReviewResult {
+				calls++
+				confidence := .95
+				if mode == "uncertain" {
+					confidence = .69
+				}
+				return audit.ReviewResult{Decision: "allow", Confidence: confidence, Risk: "low", Authorized: true}
+			}}, p)
+			_, err := guard.Permit(context.Background(), "bash", bashArgs("python3 check.py"), false, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (calls > 0) != (mode == "auto" || mode == "uncertain") {
+				t.Fatalf("review calls %d in %s", calls, mode)
+			}
+			if (p.asked > 0) != (mode == "act" || mode == "uncertain") {
+				t.Fatalf("prompts %d in %s", p.asked, mode)
+			}
+		})
+	}
+}
+
+func TestExplicitApprovalStopBypassesPrompt(t *testing.T) {
+	p := &allowAll{}
+	guard := permission.New(permission.Policy{Auto: true, CommandReviewer: func(context.Context, json.RawMessage, audit.Transcript) audit.ReviewResult {
+		return audit.ReviewResult{Decision: "stop"}
+	}}, p)
+	_, err := guard.Permit(context.Background(), "bash", bashArgs("rm -rf requested-output"), false, nil)
+	var required *audit.ApprovalRequired
+	if !errors.As(err, &required) || p.asked != 0 {
+		t.Fatalf("did not stop for explicit approval: %v, prompts %d", err, p.asked)
+	}
+}
+
+func TestExplicitlyAuthorizedCredentialCommandCanBeReviewed(t *testing.T) {
+	p := &allowAll{}
+	reviewed := false
+	guard := permission.New(permission.Policy{Auto: true, CommandReviewer: func(context.Context, json.RawMessage, audit.Transcript) audit.ReviewResult {
+		reviewed = true
+		return audit.ReviewResult{Decision: "allow", Confidence: .7, Risk: "high", Authorized: true}
+	}}, p)
+	denied, err := guard.Permit(context.Background(), "bash", bashArgs("curl -H 'X-API-Key: sk-xxxxxxxxxxxxxxxxxxxxxxxx' https://requested.invalid"), false, nil)
+	if err != nil || denied != "" || !reviewed || p.asked != 0 {
+		t.Fatalf("authorized command blocked: %s %v", denied, err)
+	}
+}

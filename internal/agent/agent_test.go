@@ -15,6 +15,7 @@ import (
 	"censi/harness/internal/assemble"
 	"censi/harness/internal/audit"
 	"censi/harness/internal/llm"
+	"censi/harness/internal/permission"
 	"censi/harness/internal/session"
 	"censi/harness/internal/tools"
 	"censi/harness/internal/wire"
@@ -790,5 +791,90 @@ func TestModelToolResultBudgetPreservesOriginalHookEvidence(t *testing.T) {
 	}
 	if !found || original < 10000 {
 		t.Fatal(found, original)
+	}
+}
+
+func TestGeneratedInstructionsAreNotHumanAuthorization(t *testing.T) {
+	for _, source := range []string{"", "runner"} {
+		log := session.New(nil)
+		a, err := agent.New(agent.Config{InputSource: source, Provider: &scripted{}, Tools: tools.NewRegistry(), Assembly: assemble.Config{Model: "worker"}}, log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = a.Run(context.Background(), "check the build"); err != nil {
+			t.Fatal(err)
+		}
+		for _, message := range log.DeriveMessages() {
+			if message.Role == session.RoleUser {
+				want := "user"
+				if source != "" {
+					want = source
+				}
+				if message.Source != want {
+					t.Fatalf("source %q, want %q", message.Source, want)
+				}
+			}
+		}
+	}
+}
+
+type approvalTestTool struct{ executions *int }
+
+func (t approvalTestTool) Definition() tools.Definition {
+	return tools.Definition{Name: "bash", Description: "Run a fixture command", Parameters: json.RawMessage(`{"type":"object"}`)}
+}
+func (t approvalTestTool) Execute(context.Context, json.RawMessage) (tools.Result, error) {
+	*t.executions++
+	return tools.Result{Content: []session.Block{session.Text("done")}}, nil
+}
+
+func TestAuditorStopEndsBatchAndRecordsApprovalQuestion(t *testing.T) {
+	executions := 0
+	registry := tools.NewRegistry()
+	if err := registry.Register(approvalTestTool{&executions}); err != nil {
+		t.Fatal(err)
+	}
+	calls := llm.Response{Message: session.Message{Role: session.RoleAssistant, Content: []session.Block{
+		session.ToolCall("a", "bash", json.RawMessage(`{"command":"rm -rf requested-output"}`)),
+		session.ToolCall("b", "bash", json.RawMessage(`{"command":"echo after"}`)),
+	}}}
+	provider := &scripted{responses: []llm.Response{calls, calls}}
+	log := session.New(nil)
+	guard := permission.New(permission.Policy{Auto: true, ProjectCommand: func(string) bool { return false }, CommandReviewer: func(_ context.Context, _ json.RawMessage, transcript audit.Transcript) audit.ReviewResult {
+		messages := audit.HumanMessages(transcript)
+		if messages[len(messages)-1] == "Yes, delete requested-output and continue" {
+			if len(audit.ApprovalRequests(transcript)) != 1 {
+				t.Fatal("approval question was lost")
+			}
+			return audit.ReviewResult{Decision: "allow", Confidence: .7, Risk: "high", Authorized: true}
+		}
+		return audit.ReviewResult{Decision: "stop"}
+	}}, nil)
+	a, err := agent.New(agent.Config{Provider: provider, Tools: registry, Guard: guard, Assembly: assemble.Config{Model: "worker"}}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := a.Run(context.Background(), "Inspect the build")
+	if err != nil || !strings.Contains(turn.Text, "May I run this command") || executions != 0 {
+		t.Fatalf("failed to pause: %+v %v executed=%d", turn, err, executions)
+	}
+	toolResults := 0
+	questions := 0
+	for _, m := range log.DeriveMessages() {
+		if m.Role == session.RoleTool {
+			toolResults++
+		}
+		if m.Source == "approval_request" {
+			questions++
+		}
+	}
+	if toolResults != 2 || questions != 1 {
+		t.Fatalf("incomplete stopped batch: results=%d questions=%d", toolResults, questions)
+	}
+	if _, err = a.Run(context.Background(), "Yes, delete requested-output and continue"); err != nil {
+		t.Fatal(err)
+	}
+	if executions != 2 {
+		t.Fatalf("approved batch executions=%d", executions)
 	}
 }

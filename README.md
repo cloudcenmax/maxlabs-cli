@@ -486,8 +486,21 @@ Auto mode shares a workspace-aware command assessment across setup, workers, and
 ordinary coding turns. Routine dependency installs, tests, validated output logs,
 and literal localhost HTTP GET/HEAD checks run unattended. Destructive operations,
 credential access, external uploads, publishing, global installs, system changes,
-and commands whose scope cannot be established still require review. Plan and
-manual approval modes retain their existing behavior.
+and commands whose scope cannot be established receive authorization review. Plan and
+manual approval modes retain their existing behavior. Commands outside the routine rules receive a separate,
+tool-free MaxLabs command review using the selected public model. It sees the
+exact command, optional Bash `reason`, workspace, and user-authored messages;
+Ordinary assistant history and tool output are excluded. Host-recorded approval
+questions are included with their position relative to user messages, so the
+auditor can interpret explicit replies. A `stop` verdict halts the current turn,
+skips remaining tool calls, and asks for explicit approval in chat; the next
+user response is reviewed against that recorded question. Commands whose effects and scope match user authorization with confidence at
+least 0.70 are approved, including high-impact actions already requested by the
+user. Risk alone does not trigger repeat confirmation. Extra effects, ambiguous
+authorization, and later user restrictions still require review. This score is a
+model judgment, not a calibrated probability. Uncertain, invalid, oversized,
+timed-out, or unavailable reviews ask for one-time confirmation. Reviews can
+add a model call and up to 30 seconds of latency; ordinary account usage applies.
 
 Quota exhaustion pauses work without discarding completed tool results. Desktop
 history offers Resume; CLI stores a private checkpoint and supports `/resume`,

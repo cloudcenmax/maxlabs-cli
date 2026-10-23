@@ -1,3 +1,4 @@
+import { ApprovalRequired, commandAuditor } from "./command-auditor.js";
 import { randomUUID } from "node:crypto";
 import process from "node:process";
 import { dirname } from 'node:path';
@@ -190,6 +191,9 @@ async function main()                {
     oauth,
     sessionId: `cli-${randomUUID()}`,
   });
+  const reviewCommand = commandAuditor(transport, workspace.root);
+  // The root conversation owns human provenance, even for delegated calls.
+  guard.commandReviewer = (args, context) => reviewCommand(args, context ? { ...context, messages: agent.log.messages() } : undefined);
   let models = await safeModels(transport);
   const settings                = {
     model: defaultModel(options.model, models),
@@ -229,9 +233,11 @@ async function main()                {
       delegationDepth++;
       try {
         const child = new Agent(new SessionLog(), transport, tools, guard, { ...settings, maxSteps: Math.min(settings.maxSteps, 40) });
-        const result = await child.run(task, new SteeringQueue(), signal);
+        const result = await child.run(task, new SteeringQueue(), signal, "runner");
+        if (result.approvalRequired) throw result.approvalRequired;
         return { text: result.text || "The child completed without a textual answer." };
       } catch (error) {
+        if (error instanceof ApprovalRequired) throw error;
         return { text: `delegate: ${messageOf(error)}`, isError: true };
       } finally { delegationDepth--; }
     },
@@ -387,7 +393,7 @@ async function main()                {
     }
   } finally { clearStatus(); router.close(); teamPreview.close(); }
 
-  async function runTurn(text        , preserveTeamBudget = false)                {
+  async function runTurn(text        , preserveTeamBudget = false, source = "user")                {
     activeAbort = new AbortController();
     router.busy = true;
     streamed = false;
@@ -412,7 +418,7 @@ async function main()                {
         const status = await teamStore.status();
         text = `[Greenfield SDE Team (Beta): stage=${status.stage}, revision=${status.revision}. Use team status for artifacts and readiness. Pending approvals are user-owned.]\n\n${text}`;
       }
-      const result = await agent.run(text, router.steering, activeAbort.signal);
+      const result = await agent.run(text, router.steering, activeAbort.signal, source);
       cancelPartialFlush();
       clearStatus();
       const restoreInput = router.beginExternalOutput();
@@ -451,7 +457,7 @@ async function main()                {
     try { process.stdout.write((await runApprovedTasks(teamStore, workflow, activeAbort.signal, () => { const directions = router.steering.drain(); if (directions.length) { for (const text of directions) agent.log.append("steering", { role: "user", content: [{ type: "text", text }], source: "user" }); throw new TeamDirectionReview(directions); } }, event => { clearStatus(); process.stdout.write(`${event.status === "passed" ? ui.success("✓") : ui.brand("→")} ${event.completed}/${event.total} · ${event.summary}\n`); })) + "\n"); }
     catch(error) { if(error instanceof TeamDirectionReview)reviewPrompt=teamDirectionPrompt(error.directions);else if(error instanceof TeamExecutionReview)reviewPrompt=teamExecutionPrompt(error.summary);else if(!await saveQuotaPause(error,true))throw error; }
     finally { clearStatus(); router.busy = false; activeAbort = undefined; process.stdout.write(teamStatusText(await teamStore.status()) + "\n"); const input=childUsage.uncachedInputTokens+childUsage.cacheReadTokens+childUsage.cacheWriteTokens; if(input)process.stdout.write(ui.tone(`[${input.toLocaleString()} input tokens · ${childUsage.outputTokens.toLocaleString()} output tokens · cache hit ${Math.round(childUsage.cacheReadTokens/input*100)}%]`)+"\n"); }
-    if(reviewPrompt)await runTurn(reviewPrompt,true);
+    if(reviewPrompt)await runTurn(reviewPrompt,true,"runner");
     else if(quotaResuming){const status=await teamStore.status();if(!Object.values(status.runs).some(run=>run.status==='paused')){await quotaCheckpoints.clear();quotaResuming=false;}}
   }
 
@@ -481,7 +487,7 @@ async function main()                {
           if(!models.some(model=>model.id===saved.settings.model))saved.settings.model=agent.settings.model;
           if(saved.workerModel&&!models.some(model=>model.id===saved.workerModel))saved.workerModel=saved.settings.model;
           agent.log.restore(saved.events);Object.assign(agent.settings,saved.settings);transport.config.sessionId=saved.sessionId;guard.mode=saved.mode;teamMode=saved.teamMode;teamWorkerModel=saved.workerModel;quotaResuming=true;workflow.resetBudget();plannerFetches=0;
-          if(saved.teamExecute)await executeApproved();else await runTurn('Resume from the last completed action. Use saved tool results and current files; preserve completed work and finish the outstanding plan.',true);
+          if(saved.teamExecute)await executeApproved();else await runTurn('Resume from the last completed action. Use saved tool results and current files; preserve completed work and finish the outstanding plan.',true,"runner");
         }catch(error){process.stderr.write(ui.error(messageOf(error)+'\n'));}
         return true;
       }
@@ -493,7 +499,7 @@ async function main()                {
           else if (action === "mode") { const status = await teamStore.setExecutionMode(arguments_[1]); process.stdout.write(`Execution: ${status.execution_mode}. Review and reapprove the plan before running workers.\n`); }
           else if (action === "workspace") { const status = await teamStore.status(); process.stdout.write(status.execution ? `Combined build: ${await teamStore.path(status.execution.path)}\nBranch: ${status.execution.branch}\nEach worker uses its own branch. Source applies on release acceptance.\n` : "No build workspace yet. Approve a plan to begin.\n"); }
           else if (action === "reference") { const status = await teamStore.attach(arguments_.slice(1).join(" ")); process.stdout.write("Design reference added. You can ask the team to use it now.\n"); }
-          else if (action === "approve") { const status = await teamStore.status(); const gate = arguments_[1]; const approved = await teamStore.approve(gate, status.gates[gate]); process.stdout.write(`Approved ${gate}. Stage: ${approved.stage}.\n`); if (gate !== "release") { teamMode = true; guard.mode = "auto"; if (gate === "spec") await executeApproved(); else await runTurn(`Continue Greenfield SDE Team from the approved ${gate}. Use team status and follow the workflow.`); } }
+          else if (action === "approve") { const status = await teamStore.status(); const gate = arguments_[1]; const approved = await teamStore.approve(gate, status.gates[gate]); process.stdout.write(`Approved ${gate}. Stage: ${approved.stage}.\n`); if (gate !== "release") { teamMode = true; guard.mode = "auto"; if (gate === "spec") await executeApproved(); else await runTurn(`Continue Greenfield SDE Team from the approved ${gate}. Use team status and follow the workflow.`, false, "runner"); } }
           else if (action === "run") { teamMode = true; guard.mode = "auto"; await executeApproved(); }
           else if (action === "status") { const status = await teamStore.status(); process.stdout.write((arguments_.includes("--json") ? JSON.stringify(status, null, 2) : teamStatusText(status)) + "\n"); }
           else if (action === "show") { const status = await teamStore.status(); const id = arguments_[1] === "--json" ? "" : arguments_[1]; const artifacts = id ? status.artifacts.filter(a => a.id === id) : status.artifacts.filter(a => ["brief", "spec", "task", "release"].includes(a.kind)); if (!artifacts.length) throw new Error(id ? "Unknown artifact ID" : "No plan saved yet. Continue discovery."); for (const a of artifacts) { const content = await teamStore.content(a); delete content.prototype_html; const run = status.runs[a.id]; process.stdout.write(`\n${ui.bold(a.kind + " · " + a.id)}\n` + (arguments_.includes("--json") ? JSON.stringify({ ...content, ...(run ? { execution: run } : {}) }, null, 2) : teamArtifactText({ ...content, ...(run ? { execution: run } : {}) })) + "\n"); } }

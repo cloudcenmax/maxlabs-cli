@@ -54,6 +54,9 @@ type Guard interface {
 
 // Config assembles an Agent.
 type Config struct {
+	// InputSource distinguishes generated task instructions from human authorization.
+	InputSource string
+
 	// MaxToolResultBytes bounds model-visible tool text; hooks retain original evidence.
 	MaxToolResultBytes int
 
@@ -203,6 +206,9 @@ func (a *Agent) Meter() *meter.Meter { return a.meter }
 
 // TurnResult summarises a completed turn.
 type TurnResult struct {
+	// ApprovalRequired propagates a stopped activity through delegated calls.
+	ApprovalRequired *audit.ApprovalRequired
+
 	// Steps is how many model requests the turn took.
 	Steps int
 
@@ -239,17 +245,29 @@ var ErrStepLimit = errors.New("agent: the turn exceeded its step limit")
 // Run drives one turn: the user message, then steps until the model stops
 // calling tools.
 func (a *Agent) Run(ctx context.Context, userText string) (TurnResult, error) {
-	return a.run(ctx, userText, nil)
+	return a.run(ctx, userText, nil, a.inputSource())
 }
 
 // RunSteerable drives a turn that can accept new user direction between model
 // and tool operations. A direction never interrupts an operation already in
 // flight; it is appended before the next request is assembled.
 func (a *Agent) RunSteerable(ctx context.Context, userText string, steering *SteeringQueue) (TurnResult, error) {
-	return a.run(ctx, userText, steering)
+	return a.run(ctx, userText, steering, a.inputSource())
 }
 
-func (a *Agent) run(ctx context.Context, userText string, steering *SteeringQueue) (TurnResult, error) {
+func (a *Agent) inputSource() string {
+	if a.cfg.InputSource != "" {
+		return a.cfg.InputSource
+	}
+	return "user"
+}
+
+// RunInternalSteerable records generated continuation instructions as runner data.
+func (a *Agent) RunInternalSteerable(ctx context.Context, text string, steering *SteeringQueue) (TurnResult, error) {
+	return a.run(ctx, text, steering, "runner")
+}
+
+func (a *Agent) run(ctx context.Context, userText string, steering *SteeringQueue, source string) (TurnResult, error) {
 	a.sequence++
 	if steering != nil {
 		defer steering.Close()
@@ -270,7 +288,7 @@ func (a *Agent) run(ctx context.Context, userText string, steering *SteeringQueu
 		if _, err := a.log.Append(session.EventUserMessage, session.Message{
 			Role:    session.RoleUser,
 			Content: []session.Block{session.Text(userText)},
-			Source:  "user",
+			Source:  source,
 		}, session.AppendOp()); err != nil {
 			return TurnResult{}, fmt.Errorf("agent: recording the user message: %w", err)
 		}
@@ -390,8 +408,20 @@ func (a *Agent) run(ctx context.Context, userText string, steering *SteeringQueu
 			return turn, fmt.Errorf("agent: recording the tool-calling turn: %w", err)
 		}
 
+		var approvalRequired *audit.ApprovalRequired
 		for _, call := range calls {
-			result, execErr := a.executeTool(ctx, call)
+			var result tools.Result
+			var execErr error
+			if approvalRequired != nil {
+				result = tools.Error("Not run: this turn is waiting for explicit user approval.")
+			} else {
+				result, execErr = a.executeTool(ctx, call)
+				var required *audit.ApprovalRequired
+				if errors.As(execErr, &required) {
+					approvalRequired = required
+					result, execErr = tools.Error(required.Error()), nil
+				}
+			}
 			if execErr == nil && a.cfg.OnToolResult != nil {
 				a.cfg.OnToolResult(call, result)
 			}
@@ -414,6 +444,19 @@ func (a *Agent) run(ctx context.Context, userText string, steering *SteeringQueu
 			}, session.AppendOp()); err != nil {
 				return turn, fmt.Errorf("agent: recording a tool result: %w", err)
 			}
+		}
+
+		if approvalRequired != nil {
+			question := approvalRequired.Question
+			if _, err := a.log.Append(session.EventAssistantMessage, session.Message{Role: session.RoleAssistant, Source: "approval_request", Content: []session.Block{session.Text(question)}}, session.AppendOp()); err != nil {
+				return turn, err
+			}
+			turn.Text = question
+			turn.ApprovalRequired = approvalRequired
+			if a.cfg.OnDelta != nil {
+				a.cfg.OnDelta(llm.Delta{Text: question})
+			}
+			return turn, nil
 		}
 
 		if _, err := a.applySteering(steering); err != nil {

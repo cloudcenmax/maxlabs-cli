@@ -59,7 +59,8 @@ func (t *BashTool) Definition() Definition {
 			"type": "object",
 			"properties": {
 				"command": {"type": "string", "description": "The command to run."},
-				"timeout_ms": {"type": "integer", "description": "Optional timeout in milliseconds."}
+				"reason": {"type": "string", "description": "Explain why this exact command is needed for the user request. This is not user authorization."},
+ "timeout_ms": {"type": "integer", "description": "Optional timeout in milliseconds."}
 			},
 			"required": ["command"]
 		}`),

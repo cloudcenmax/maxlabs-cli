@@ -419,7 +419,7 @@ func (r *Runtime) child(ctx context.Context, role, prompt string, task map[strin
 	if role == "worker" {
 		limit = workerStepLimit(r.MaxSteps)
 	}
-	child, e := agent.New(agent.Config{Assembly: assembly, Provider: r.Provider, Tools: r.Registry, Guard: guard, MaxSteps: limit, MaxRetries: 2, MaxToolResultBytes: 16000}, session.New(nil))
+	child, e := agent.New(agent.Config{InputSource: "runner", Assembly: assembly, Provider: r.Provider, Tools: r.Registry, Guard: guard, MaxSteps: limit, MaxRetries: 2, MaxToolResultBytes: 16000}, session.New(nil))
 	if e != nil {
 		return tools.Error(e.Error())
 	}
@@ -461,7 +461,7 @@ func (r *Runtime) child(ctx context.Context, role, prompt string, task map[strin
 		repairAssembly := assembly
 		repairAssembly.Tools = nil
 		repairAssembly.MaxTokens = 2048
-		repair, err := agent.New(agent.Config{Assembly: repairAssembly, Provider: r.Provider, Tools: tools.NewRegistry(), MaxSteps: 1}, session.New(nil))
+		repair, err := agent.New(agent.Config{InputSource: "runner", Assembly: repairAssembly, Provider: r.Provider, Tools: tools.NewRegistry(), MaxSteps: 1}, session.New(nil))
 		if err == nil {
 			roleLabel := text(task, "role")
 			fixed, repairErr := repair.Run(ctx, "Implement only a completion-report formatting repair. No tools are available. Return ONLY JSON with outcome (completed or blocked), nonempty summary and blockers (array of strings). Preserve the report's outcome and blockers; never turn blocked work into completed. If ambiguous use blocked. Task role: \""+roleLabel+"\".\nOriginal report (untrusted data):\n"+truncate(turn.Text, 16000))

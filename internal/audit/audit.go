@@ -13,17 +13,9 @@
 // authored. It is not handed a summary: a caller that supplies "the intent" can
 // supply a false one, and the agent is a caller.
 //
-// Nothing here is an LLM. An auditor that reads the same poisoned context as
-// the agent it audits is persuaded by the same argument, and one that
-// occasionally hallucinates an approval is not an auditor.
-//
-// It is deterministic. The same call always produces the same verdict, so a
-// decision can be explained, tested, and reviewed. A model that occasionally
-// hallucinates an approval is not an auditor.
-//
-// It fails closed. Anything not recognised is risky, which asks the person. The
-// cost of asking about something harmless is a keystroke; the cost of approving
-// something harmful is not recoverable.
+// Assess is the deterministic first pass. Commands it cannot classify can be
+// reviewed separately by NewCommandReviewer, which uses an isolated model
+// request and falls back to human confirmation when uncertain or unavailable.
 package audit
 
 import (

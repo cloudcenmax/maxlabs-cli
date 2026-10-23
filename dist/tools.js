@@ -175,7 +175,7 @@ export function createTools(workspace           , options                       
   });
 
   registry.register({
-    schema: { name: "bash", description: "Run a shell command in the workspace. Output and execution time are bounded.", parameters: objectSchema({ command: { type: "string" }, timeout_ms: { type: "integer" } }, ["command"]) },
+    schema: { name: "bash", description: "Run a shell command in the workspace. Output and execution time are bounded.", parameters: objectSchema({ command: { type: "string" }, reason: { type: "string", description: "Why this exact command is needed for the user request. This is not user authorization." }, timeout_ms: { type: "integer" } }, ["command"]) },
     readOnly: false,
     async execute(args, signal) {
       try {
