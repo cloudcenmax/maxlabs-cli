@@ -11,7 +11,7 @@ test('CLI exits on quota and resumes after restart without replaying completed w
  const root=await mkdtemp(join(tmpdir(),'quota-cli-e2e-'));let available=false,calls=0,restored=false;
  const server=createServer(async(req,res)=>{
   res.setHeader('content-type','application/json');
-  if(req.url==='/v1/models'){res.end(JSON.stringify({data:[{id:'worker',description:'Worker by MaxLabs'}]}));return;}
+  if(req.url==='/v1/models'){res.end(JSON.stringify({data:[{id:'worker',description:'Worker by Cenmax AI'}]}));return;}
   if(req.url==='/v1/usage/me'){res.end(JSON.stringify({windows:[{type:'weekly',percent_used:100,percent_settled:available?20:100,resets_at:'2099-01-01T00:00:00Z'}]}));return;}
   if(req.url!=='/v1/chat/completions'){res.writeHead(404);res.end('{}');return;}
   let raw='';for await(const chunk of req)raw+=chunk;const body=JSON.parse(raw);calls++;

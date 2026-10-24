@@ -6,7 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { OAuthSession, defaultAuthStore } from '../src/auth.ts';
 import { parseUsage } from '../src/transport.ts';
 
-const authURL = (process.env.MAXLABS_AUTH_URL || 'https://console.maxlabs.cenmax.in').replace(/\/$/, '');
+const authURL = (process.env.MAXLABS_AUTH_URL || 'https://console.ai.cenmax.in').replace(/\/$/, '');
 const oauth = new OAuthSession(authURL, defaultAuthStore());
 const reportPath = resolve(process.env.GREENFIELD_E2E_REPORT || '/private/tmp/maxlabs-greenfield-e2e/usage.json');
 const port = Number(process.env.GREENFIELD_E2E_PROXY_PORT || 18790);
@@ -54,7 +54,7 @@ const server = createServer(async (req, res) => {
       console.log(`[request ${call.id}] ${call.role} / ${call.model}`);
     }
     const token = await oauth.accessToken(abort.signal);
-    if (!token) throw new Error('Sign in to MaxLabs CLI before running live acceptance tests');
+    if (!token) throw new Error('Sign in to Cenmax AI CLI before running live acceptance tests');
     const upstream = await fetch(`${authURL}/app/v1${path.slice(3)}`, { method: req.method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'text/event-stream', 'x-session-id': String(req.headers['x-session-id'] || 'greenfield-e2e') }, body: req.method === 'POST' ? requestBody : undefined, signal: abort.signal });
     if (call) call.status = upstream.status;
     const contentType = upstream.headers.get('content-type') || 'application/json';

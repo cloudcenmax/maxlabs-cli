@@ -41,12 +41,12 @@ test('reported inspection command executes without prompting or reading environm
 test('literal worker file payload executes unchanged without prompting',async()=>{
  const root=await mkdtemp(join(tmpdir(),'team-literal-'));
  const payload="<?php\n$literal = '$(touch should-not-exist)';\n";
- const command="cat > check.php <<'PHP'\n"+payload+"PHP\nprintf 'MaxLabs test passed\\n' > test-output.log\ncat test-output.log";
+ const command="cat > check.php <<'PHP'\n"+payload+"PHP\nprintf 'Cenmax AI test passed\\n' > test-output.log\ncat test-output.log";
  let prompts=0;
  const workspace=await Workspace.open(root),tools=createTools(workspace),guard=new FlexiblePermissions(new TeamStore(workspace),false,new PermissionGuard('auto',async()=>{prompts++;return 'deny';}));
  const tool=tools.get('bash')!;
  assert.equal(await guard.permit(tool,{command}),undefined);
- const result=await tool.execute({command});assert.equal(result.isError,false,result.text);assert.equal(prompts,0);assert.match(result.text,/MaxLabs test passed/);
+ const result=await tool.execute({command});assert.equal(result.isError,false,result.text);assert.equal(prompts,0);assert.match(result.text,/Cenmax AI test passed/);
  assert.equal(await readFile(join(root,'check.php'),'utf8'),payload);
  await assert.rejects(readFile(join(root,'should-not-exist')),{code:'ENOENT'});
 });

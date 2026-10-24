@@ -82,7 +82,7 @@ func workerEnvironment() []string {
 	return result
 }
 func gitCommand(ctx context.Context, root string, args ...string) (string, error) {
-	command := exec.CommandContext(ctx, "git", append([]string{"-C", root, "-c", "user.name=MaxLabs Team", "-c", "user.email=team@localhost", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=" + os.DevNull}, args...)...)
+	command := exec.CommandContext(ctx, "git", append([]string{"-C", root, "-c", "user.name=Cenmax AI Team", "-c", "user.email=team@localhost", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=" + os.DevNull}, args...)...)
 	command.Env = append(workerEnvironment(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
 	output, err := command.CombinedOutput()
 	if err != nil {

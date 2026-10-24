@@ -7,7 +7,7 @@ import { safeTaskPath,                                } from './greenfield.js';
 
 const hash=(raw           )       =>createHash('sha256').update(raw).digest('hex');
 const omitted=new Set(['.git','.maxlabs','node_modules','vendor','.venv','venv','__pycache__','.next','.nuxt','.cache','.pytest_cache','.DS_Store','.aws','.ssh','.npmrc','.netrc','.pypirc','auth.json']);
-export function workerEnvironment()                   {return Object.fromEntries(Object.entries(process.env).filter(([key])=>!/(TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY|PRIVATE_KEY|^HARNESS_|^MAXLABS_|^OPENAI_|^ANTHROPIC_|^SSH_AUTH_SOCK$|^NODE_TEST_CONTEXT$)/i.test(key)));}
+export function workerEnvironment()                   {return Object.fromEntries(Object.entries(process.env).filter(([key])=>!/(TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY|PRIVATE_KEY|^HARNESS_|^CENMAX_AI_|^MAXLABS_|^OPENAI_|^ANTHROPIC_|^SSH_AUTH_SOCK$|^NODE_TEST_CONTEXT$)/i.test(key)));}
 export async function sourceFiles(root       )                                {
  const files                      ={};let bytes=0;
  const walk=async(directory       ,prefix='')              =>{for(const entry of await readdir(directory,{withFileTypes:true})){
@@ -17,7 +17,7 @@ export async function sourceFiles(root       )                                {
  }};await walk(root);return files;
 }
 export async function git(root       ,args         ,signal             )                {
- const result=await promisify(execFile)('git',['-C',root,'-c','user.name=MaxLabs Team','-c','user.email=team@localhost','-c','commit.gpgsign=false','-c','core.hooksPath=/dev/null',...args],{env:{...workerEnvironment(),GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null'},signal,maxBuffer:5*1024*1024});return result.stdout.trim();
+ const result=await promisify(execFile)('git',['-C',root,'-c','user.name=Cenmax AI Team','-c','user.email=team@localhost','-c','commit.gpgsign=false','-c','core.hooksPath=/dev/null',...args],{env:{...workerEnvironment(),GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null'},signal,maxBuffer:5*1024*1024});return result.stdout.trim();
 }
 export async function prepareExecution(store          ,state          ,signal             )                {
  if(state.execution?.applied_commit)delete state.execution;

@@ -1,10 +1,10 @@
-# MaxLabs CLI
+# Cenmax AI CLI
 
-The cache-optimised MaxLabs coding agent for your terminal.
+The cache-optimised Cenmax AI coding agent for your terminal.
 
 ## Install and run
 
-MaxLabs CLI is implemented in TypeScript and distributed as a normal npm
+Cenmax AI CLI is implemented in TypeScript and distributed as a normal npm
 package. It contains no native binary, installer, or platform-specific `.exe`.
 Node.js 22.13 or newer is required.
 
@@ -16,7 +16,7 @@ maxlabs
 Run it without a global installation with:
 
 ```bash
-npx maxlabs
+npx --package maxlabs cenmax-ai
 ```
 
 OAuth is attempted first. Personal and work sessions are stored separately in
@@ -24,19 +24,19 @@ OAuth is attempted first. Personal and work sessions are stored separately in
 available contexts, `/account add` to connect another context through browser
 consent, and `/account 2` (or its name/ID) to switch. Switching clears the
 conversation so personal context cannot cross into a work request. `/logout`
-clears every saved OAuth context. Set `MAXLABS_API_KEY` and `MAXLABS_BASE_URL`
+clears every saved OAuth context. Set `CENMAX_AI_API_KEY` and `CENMAX_AI_BASE_URL`
 when an API-key fallback is needed. Common options include:
 
-Production defaults to `https://console.maxlabs.cenmax.in` for OAuth and
-`https://api.maxlabs.cenmax.in/v1` for API requests. Both remain overridable
-with `MAXLABS_AUTH_URL` and `MAXLABS_BASE_URL` for development and testing.
+Production defaults to `https://console.ai.cenmax.in` for OAuth and
+`https://api.ai.cenmax.in/v1` for API requests. Both remain overridable
+with `CENMAX_AI_AUTH_URL` and `CENMAX_AI_BASE_URL` for development and testing.
 
 ```bash
 maxlabs --workspace . --model auto --auto
 maxlabs --prompt "review this change" --web-search auto
 ```
 
-While a turn is running, type another instruction and press Enter. MaxLabs
+While a turn is running, type another instruction and press Enter. Cenmax AI
 queues it and applies it after the current model request or tool operation reaches
 a safe boundary. Use `/model`, `/auto`, `/plan`, `/act`, `/think`, `/web`, and
 `/help` inside the interactive shell.
@@ -49,7 +49,7 @@ but only for the part of the request that is byte-identical to a previous
 request, compared from the first token.
 
 The tempting approach is to build an agent and then add "prefix discipline".
-MaxLabs CLI inverts that. Its one obligation is:
+Cenmax AI CLI inverts that. Its one obligation is:
 
 > **Every model request must be reconstructable from an append-only session
 > log.**
@@ -143,7 +143,7 @@ the corresponding gate has stopped measuring anything.
 
 ## Provider neutrality
 
-MaxLabs CLI names no inference provider and no vendor. Cache behaviour is
+Cenmax AI CLI names no inference provider and no vendor. Cache behaviour is
 expressed as a capability — implicit caching, explicit breakpoints, or none —
 never as a brand.
 
@@ -438,7 +438,7 @@ clean text.
 
 A stack-agnostic workflow for refining an idea, approving a design and plan,
 building small behavior slices, independently verifying them, and accepting the
-release. Start with `maxlabs --team` or `/team` in an interactive session.
+release. Start with `cenmax-ai --team` or `/team` in an interactive session.
 
 ```text
 /team status                 progress, next action, and latest worker token totals
@@ -488,7 +488,7 @@ and literal localhost HTTP GET/HEAD checks run unattended. Destructive operation
 credential access, external uploads, publishing, global installs, system changes,
 and commands whose scope cannot be established receive authorization review. Plan and
 manual approval modes retain their existing behavior. Commands outside the routine rules receive a separate,
-tool-free MaxLabs command review using the selected public model. It sees the
+tool-free Cenmax AI command review using the selected public model. It sees the
 exact command, optional Bash `reason`, workspace, and user-authored messages;
 Ordinary assistant history and tool output are excluded. Host-recorded approval
 questions are included with their position relative to user messages, so the

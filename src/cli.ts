@@ -597,7 +597,7 @@ async function main(): Promise<void> {
 async function safeModels(transport: GatewayTransport): Promise<ModelCard[]> {
   try { return await transport.models(); }
   catch (error) {
-    if (!process.env.MAXLABS_MODEL && !process.env.HARNESS_MODEL && !process.argv.some((arg) => arg === "--model" || arg.startsWith("--model="))) throw error;
+    if (!process.env.CENMAX_AI_MODEL && !process.env.MAXLABS_MODEL && !process.env.HARNESS_MODEL && !process.argv.some((arg) => arg === "--model" || arg.startsWith("--model="))) throw error;
     return [];
   }
 }
@@ -629,7 +629,7 @@ function help(): void {
   /account remove [N|ID]  forget one saved account
   /login      connect OAuth
   /logout     clear every saved OAuth account
-  /exit       leave MaxLabs CLI
+  /exit       leave Cenmax AI CLI
 
   While a turn is running, type a new direction and press Enter. It is applied
   after the current model or tool operation reaches a safe boundary.
@@ -702,10 +702,10 @@ function parseOptions(args: string[]): Options {
   return {
     prompt: value("prompt") || undefined,
     workspace: value("workspace", process.cwd()),
-    model: value("model", process.env.MAXLABS_MODEL || process.env.HARNESS_MODEL || ""),
-    baseUrl: value("base-url", process.env.MAXLABS_BASE_URL || process.env.HARNESS_BASE_URL || "https://api.maxlabs.cenmax.in/v1") || undefined,
-    apiKey: value("api-key", process.env.MAXLABS_API_KEY || process.env.HARNESS_API_KEY || "") || undefined,
-    authUrl: value("auth-url", process.env.MAXLABS_AUTH_URL || process.env.HARNESS_AUTH_URL || "https://console.maxlabs.cenmax.in").replace(/\/$/, ""),
+    model: value("model", process.env.CENMAX_AI_MODEL || process.env.MAXLABS_MODEL || process.env.HARNESS_MODEL || ""),
+    baseUrl: value("base-url", process.env.CENMAX_AI_BASE_URL || process.env.MAXLABS_BASE_URL || process.env.HARNESS_BASE_URL || "https://api.ai.cenmax.in/v1") || undefined,
+    apiKey: value("api-key", process.env.CENMAX_AI_API_KEY || process.env.MAXLABS_API_KEY || process.env.HARNESS_API_KEY || "") || undefined,
+    authUrl: value("auth-url", process.env.CENMAX_AI_AUTH_URL || process.env.MAXLABS_AUTH_URL || process.env.HARNESS_AUTH_URL || "https://console.ai.cenmax.in").replace(/\/$/, ""),
     oauthStore: value("oauth-store", defaultAuthStore()),
     oauthLogin: !flag("no-oauth-login"),
     mode: flag("auto") ? "auto" : "act",

@@ -93,7 +93,7 @@ func (t verificationTool) Execute(ctx context.Context, args json.RawMessage) (to
 	var result tools.Result
 	var err error
 	if goruntime.GOOS == "windows" && strings.Contains(text(input, "command"), "|") {
-		result = tools.Error("MaxLabs verification requires an unpiped command on Windows so a failed test cannot be hidden by an output filter.")
+		result = tools.Error("Cenmax AI verification requires an unpiped command on Windows so a failed test cannot be hidden by an output filter.")
 	} else {
 		execution := input
 		if goruntime.GOOS != "windows" {

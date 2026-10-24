@@ -1,9 +1,10 @@
 {
   "name": "maxlabs",
-  "version": "0.1.1",
-  "description": "OAuth-first MaxLabs coding agent for your terminal",
+  "version": "0.1.2",
+  "description": "OAuth-first Cenmax AI coding agent for your terminal",
   "type": "module",
   "bin": {
+    "cenmax-ai": "bin/maxlabs.js",
     "maxlabs": "bin/maxlabs.js"
   },
   "files": [

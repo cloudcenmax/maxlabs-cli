@@ -303,7 +303,7 @@ func TestBashPipelinesPreserveProducerFailure(t *testing.T) {
 			t.Fatalf("%s: %v %s", command, err, text(result))
 		}
 	}
-	result := run(t, tool, `{"command":"printf 'MaxLabs passed\\n' | tail -1"}`)
+	result := run(t, tool, `{"command":"printf 'Cenmax AI passed\\n' | tail -1"}`)
 	if result.IsError {
 		t.Fatal(text(result))
 	}

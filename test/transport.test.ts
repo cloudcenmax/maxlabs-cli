@@ -28,7 +28,7 @@ for(const code of ['quota_exhausted','authentication_error','context_length_exce
 });
 
 test('buffered SSE completion and trailing data without newline retain tools and usage',async t=>{
- const payload={choices:[{message:{content:'MaxLabs response',tool_calls:[{id:'c1',function:{name:'read',arguments:'{"path":"README.md"}'}}]},finish_reason:'tool_calls'}],usage:{completion_tokens:3}};
+ const payload={choices:[{message:{content:'Cenmax AI response',tool_calls:[{id:'c1',function:{name:'read',arguments:'{"path":"README.md"}'}}]},finish_reason:'tool_calls'}],usage:{completion_tokens:3}};
  t.mock.method(globalThis,'fetch',async()=>new Response('data: '+JSON.stringify(payload)+'\n\ndata: {"choices":[],"usage":{"completion_tokens":4}}',{headers:{'content-type':'text/event-stream'}}));
  const transport=new GatewayTransport({baseUrl:'https://fixture.invalid/v1',sessionId:'test'}),result=await transport.complete({model:'worker',messages:[],tools:[],maxTokens:32,thinking:'default',webSearch:'off',webSearchUses:0});
  assert.equal(result.message.content.length,2);assert.equal(result.usage.outputTokens,4);

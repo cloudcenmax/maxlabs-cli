@@ -69,11 +69,11 @@ export class PermissionGuard {
       try { result = await this.commandReviewer(arguments_, context); } catch { /* confirmation fallback */ }
       context?.signal?.throwIfAborted();
       if (result?.decision === 'stop') {
-        this.decisions.push({ ...decision, effect:'deny', oneTimeOnly:true, reason:'MaxLabs command auditor stopped for explicit user approval', tool:'bash', granted:false });
+        this.decisions.push({ ...decision, effect:'deny', oneTimeOnly:true, reason:'Cenmax AI command auditor stopped for explicit user approval', tool:'bash', granted:false });
         throw new ApprovalRequired(String(arguments_.command || ''), result.reviewedWorkspace);
       }
       decision = { ...decision, effect: allowsReview(result) ? 'allow' : 'ask', oneTimeOnly: true,
-        reason: allowsReview(result) ? 'MaxLabs command auditor approved: effects and scope match the user request' : 'MaxLabs command auditor needs confirmation: authorization, scope, or effects are uncertain' };
+        reason: allowsReview(result) ? 'Cenmax AI command auditor approved: effects and scope match the user request' : 'Cenmax AI command auditor needs confirmation: authorization, scope, or effects are uncertain' };
     }
     if (decision.effect === "allow") {
       this.decisions.push({ ...decision, tool: tool.schema.name, granted: true });

@@ -45,11 +45,11 @@ func TestStreamReportsServiceErrorsInsteadOfEmptyResponses(t *testing.T) {
 }
 
 func TestStreamAcceptsBufferedCompletionInsideSSE(t *testing.T) {
-	srv := sseServer(t, []string{`{"choices":[{"message":{"content":"MaxLabs response","tool_calls":[{"id":"c1","type":"function","function":{"name":"read","arguments":"{\"path\":\"README.md\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"completion_tokens":3}}`, `{"choices":[],"usage":{"completion_tokens":4}}`}, nil)
+	srv := sseServer(t, []string{`{"choices":[{"message":{"content":"Cenmax AI response","tool_calls":[{"id":"c1","type":"function","function":{"name":"read","arguments":"{\"path\":\"README.md\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"completion_tokens":3}}`, `{"choices":[],"usage":{"completion_tokens":4}}`}, nil)
 	defer srv.Close()
 	p := &llm.HTTPProvider{BaseURL: srv.URL, Model: "worker"}
 	result, err := p.Stream(context.Background(), sampleRequest(), nil)
-	if err != nil || len(result.Message.ToolCalls()) != 1 || result.Message.Content[0].Text != "MaxLabs response" || result.Usage.OutputTokens != 4 {
+	if err != nil || len(result.Message.ToolCalls()) != 1 || result.Message.Content[0].Text != "Cenmax AI response" || result.Usage.OutputTokens != 4 {
 		t.Fatalf("buffered SSE completion lost: %+v %v", result, err)
 	}
 }

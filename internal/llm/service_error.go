@@ -20,7 +20,7 @@ func (e *ServiceError) Error() string {
 	if e.Display != "" {
 		return e.Display
 	}
-	return "MaxLabs: " + e.Message
+	return "Cenmax AI: " + e.Message
 }
 func (e *ServiceError) Retryable() bool { return e.CanRetry }
 func (e *ServiceError) Resumable() bool {

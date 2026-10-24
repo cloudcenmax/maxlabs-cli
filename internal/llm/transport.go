@@ -236,7 +236,7 @@ func (p *HTTPProvider) Complete(ctx context.Context, req wire.Request) (Response
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return Response{}, p.responseError("MaxLabs", resp)
+		return Response{}, p.responseError("Cenmax AI", resp)
 	}
 
 	return p.consumeBufferedResponse(resp.Body)

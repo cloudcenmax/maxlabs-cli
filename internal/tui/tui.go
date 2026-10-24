@@ -1191,7 +1191,7 @@ func renderMarkdown(text string, styled bool) string {
 }
 
 func (s *Shell) banner() {
-	s.status.println("MaxLabs CLI. /help for commands, /exit to leave.")
+	s.status.println("Cenmax AI CLI. /help for commands, /exit to leave.")
 	s.status.printf("workspace: %s", s.workspace)
 	s.status.printf("model:     %s", s.agent.Assembly().Model)
 	s.status.println("")

@@ -162,7 +162,7 @@ func Fetch(ctx context.Context, rawURL string) (Page, error) {
 	}
 
 	request.Header.Set("Accept", "text/html,text/plain,application/json,application/xml,text/*;q=0.9,*/*;q=0.1")
-	request.Header.Set("User-Agent", "maxlabs-cli/1.0 (+local agent)")
+	request.Header.Set("User-Agent", "cenmax-ai-cli/1.0 (+local agent)")
 
 	response, err := client.Do(request)
 	if err != nil {

@@ -47,10 +47,10 @@ test("startup branding is stable and animation-free in CI", async () => {
 
 test("NO_COLOR disables ANSI styling", () => {
   const ui = new Presentation(true, { NO_COLOR: "1", COLORTERM: "truecolor" });
-  assert.equal(ui.brand("MaxLabs"), "MaxLabs");
+  assert.equal(ui.brand("Cenmax AI"), "Cenmax AI");
 });
 
 test("MAXLABS_COLOR explicitly overrides NO_COLOR", () => {
   const ui = new Presentation(true, { NO_COLOR: "1", MAXLABS_COLOR: "1", COLORTERM: "truecolor" });
-  assert.match(ui.brand("MaxLabs"), /\x1b\[38;2;255;102;178m/);
+  assert.match(ui.brand("Cenmax AI"), /\x1b\[38;2;255;102;178m/);
 });

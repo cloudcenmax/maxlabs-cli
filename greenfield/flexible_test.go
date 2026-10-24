@@ -331,7 +331,7 @@ func (p *coordinatorRecoveryProvider) Complete(ctx context.Context, req wire.Req
 			if b.Type == session.BlockToolResult {
 				hasResult = true
 			}
-			if strings.HasPrefix(b.Text, "You are the MaxLabs engineering coordinator") {
+			if strings.HasPrefix(b.Text, "You are the Cenmax AI engineering coordinator") {
 				recovery = true
 			}
 			if pos := strings.LastIndex(b.Text, "\n\n{"); pos >= 0 {
@@ -491,7 +491,7 @@ func TestRecoveryFingerprintMatchesCLIAndIgnoresLaravelRuntimeData(t *testing.T)
 	for _, name := range []string{"artisan", "résumé&.txt", "\ue000.txt", "\U00010000.txt", "storage/framework/views/.gitignore"} {
 		path := filepath.Join(root, name)
 		_ = os.MkdirAll(filepath.Dir(path), 0755)
-		if err := os.WriteFile(path, []byte("MaxLabs fixture"), 0600); err != nil {
+		if err := os.WriteFile(path, []byte("Cenmax AI fixture"), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}

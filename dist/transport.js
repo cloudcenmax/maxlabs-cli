@@ -28,14 +28,14 @@ export class ServiceError extends Error {
   resetsAt        ;
            code       ;
   get resumable()        {return this.code==='request_limit'||this.code==='temporary_rate_limit';}
-  constructor(message       ,retryable        ,code='service_unavailable'){super('MaxLabs: '+message);this.name='ServiceError';this.retryable=retryable;this.code=code;}
+  constructor(message       ,retryable        ,code='service_unavailable'){super('Cenmax AI: '+message);this.name='ServiceError';this.retryable=retryable;this.code=code;}
 }
 function eventError(payload                       )                        {
  if(payload.error===undefined||payload.error===null)return;
  const fields=payload.error                          ,code=String(fields?.code||'')+' '+String(fields?.type||'');
  if(/quota/i.test(code)){
   const error=new ServiceError('The request limit has been reached. Check account limits before retrying.',false,'request_limit');
-  if(['h5','weekly'].includes(String(fields.window))){error.window=String(fields.window);error.message='MaxLabs: The '+(error.window==='h5'?'five-hour':'weekly')+' allowance cannot cover this request.';
+  if(['h5','weekly'].includes(String(fields.window))){error.window=String(fields.window);error.message='Cenmax AI: The '+(error.window==='h5'?'five-hour':'weekly')+' allowance cannot cover this request.';
    if(typeof fields.resets_at==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(fields.resets_at)&&Number.isFinite(Date.parse(fields.resets_at))){error.resetsAt=new Date(fields.resets_at).toISOString();error.message+=' Resets at '+error.resetsAt+'.';}
   }return error;
  }

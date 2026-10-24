@@ -95,7 +95,7 @@ function recoveryTransport(keepCapping=false,mutate=false,blind=false,cacheOutpu
  const usage={uncachedInputTokens:10,cacheReadTokens:90,cacheWriteTokens:0,outputTokens:5,reasoningTokens:0,webSearches:0};
  const transport:any={async complete(request:any){
   let packet:any={};let recovery=false,hasResult=false;
-  for(const m of request.messages)for(const b of m.content){if(b.type==='tool_result')hasResult=true;if(b.text?.startsWith('You are the MaxLabs engineering coordinator'))recovery=true;const pos=b.text?.lastIndexOf('\n\n{')??-1;if(pos>=0)try{packet=JSON.parse(b.text.slice(pos+2));}catch{}}
+  for(const m of request.messages)for(const b of m.content){if(b.type==='tool_result')hasResult=true;if(b.text?.startsWith('You are the Cenmax AI engineering coordinator'))recovery=true;const pos=b.text?.lastIndexOf('\n\n{')??-1;if(pos>=0)try{packet=JSON.parse(b.text.slice(pos+2));}catch{}}
   const call=(name:string,args:any)=>({type:'tool_call',callId:name,name,arguments:JSON.stringify(args)}),answer=(content:any[])=>({message:{role:'assistant',content},usage});
   if(recovery){recoveryCalls++;if(!hasResult&&!blind){if(cacheOutput)await writeFile(join(packet.workspace,'.phpunit.result.cache'),'generated test timings');return answer([mutate?call('verify',{command:'printf unexpected > partial.txt'}):call('read',{path:'partial.txt'})]);}return answer([{type:'text',text:JSON.stringify({action:'continue',summary:'Observed fixture failure; finish using the preserved dependency setup.',next_steps:['Complete alpha.mjs and run targeted verification without discarding partial work or vendor.']})}]);}
   const id=packet.task?.role==='qa'?'qa':packet.task?.summary?.split(' ').at(-1);

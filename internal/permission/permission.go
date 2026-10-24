@@ -296,13 +296,13 @@ func (g *Guard) Permit(ctx context.Context, tool string, args json.RawMessage, r
 			if err := ctx.Err(); err != nil {
 				return "", err
 			}
-			g.record(Outcome{Effect: Deny, Reason: "MaxLabs command auditor stopped for explicit user approval"})
+			g.record(Outcome{Effect: Deny, Reason: "Cenmax AI command auditor stopped for explicit user approval"})
 			return "", audit.RequireApproval(args, result.ReviewedWorkspace)
 		}
 		if result.Allows() {
-			effect, reason = Allow, "MaxLabs command auditor approved: effects and scope match the user request"
+			effect, reason = Allow, "Cenmax AI command auditor approved: effects and scope match the user request"
 		} else {
-			reason = "MaxLabs command auditor needs confirmation: authorization, scope, or effects are uncertain"
+			reason = "Cenmax AI command auditor needs confirmation: authorization, scope, or effects are uncertain"
 		}
 		req.OneTimeOnly = true
 		req.RiskReason = reason

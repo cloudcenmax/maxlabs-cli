@@ -193,7 +193,7 @@ export function createTools(workspace           , options                       
       try {
         const url = new URL(requiredString(args.url, "url"));
         await assertPublicUrl(url);
-        const response = await fetch(url, { redirect: "error", signal: AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(20_000)]), headers: { "user-agent": "MaxLabs-CLI/0.1" } });
+        const response = await fetch(url, { redirect: "error", signal: AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(20_000)]), headers: { "user-agent": "CenmaxAI-CLI/0.1" } });
         if (!response.ok) return { text: `webfetch: HTTP ${response.status}`, isError: true };
         const contentType = response.headers.get("content-type") || "";
         const received = await response.text();
