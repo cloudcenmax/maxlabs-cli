@@ -23,7 +23,6 @@ import (
 	"censi/harness/greenfield"
 	"censi/harness/internal/agent"
 	"censi/harness/internal/assemble"
-	"censi/harness/internal/audit"
 	"censi/harness/internal/llm"
 	"censi/harness/internal/oauth"
 	"censi/harness/internal/permission"
@@ -120,7 +119,7 @@ func run() error {
 
 	// The guard is shared with the shell and with every subagent: a delegated
 	// task must not become a way around a refusal the user gave.
-	guard := permission.New(permission.Policy{Auto: *autoMode, Workspace: ws.Root(), CommandReviewer: audit.NewCommandReviewer(provider, *model, ws.Root()), ProjectCommand: func(command string) bool { return greenfield.ProjectAutoCommand(ws.Root(), command) }}, nil)
+	guard := permission.New(permission.Policy{Auto: *autoMode, Workspace: ws.Root(), CommandReviewer: commandReviewer(provider, *model, ws.Root()), ProjectCommand: func(command string) bool { return greenfield.ProjectAutoCommand(ws.Root(), command) }}, nil)
 
 	// The delegation tool is registered before the parent's tool list is
 	// complete, then told the complete list. It has to inherit its own
@@ -204,7 +203,7 @@ func run() error {
 			provider.Model = config.Model
 			policy := guard.Policy()
 			policy.Workspace = ws.Root()
-			policy.CommandReviewer = audit.NewCommandReviewer(provider, config.Model, ws.Root())
+			policy.CommandReviewer = commandReviewer(provider, config.Model, ws.Root())
 			guard.SetPolicy(policy)
 			delegate.SetAssembly(config)
 		},

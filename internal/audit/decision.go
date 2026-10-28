@@ -67,22 +67,52 @@ func NewDecisionReviewer(provider DecisionProvider, model, workspace string) Rev
 	}
 }
 
-// NewFallbackReviewer runs primary, and only when it produced no decision runs
-// fallback. It never mixes the two: a partial answer from one auditor is not
-// evidence for the other.
-func NewFallbackReviewer(primary, fallback Reviewer) Reviewer {
+// NewSecondOpinionReviewer asks the primary auditor first and, when its answer
+// does not settle the call, asks a second one.
+//
+// The decision model is fast and cheap but deliberately conservative on opaque
+// command text: a Python heredoc or a Playwright driver often comes back
+// "allow" with confidence just under the gate, which used to become a prompt.
+// A chat model reads the same state and, in practice, establishes those
+// ordinary steps; asking it only for the unsettled calls keeps routine work
+// unattended without making the cheap model the sole authority.
+//
+// A "stop" is final. The second opinion exists to resolve uncertainty, not to
+// overturn a refusal.
+func NewSecondOpinionReviewer(primary, second Reviewer) Reviewer {
 	return func(ctx context.Context, args json.RawMessage, transcript Transcript) ReviewResult {
+		first := ReviewResult{}
 		if primary != nil {
-			if result := primary(ctx, args, transcript); result.Decision != "" {
-				return result
-			}
+			first = primary(ctx, args, transcript)
 		}
 
-		if fallback != nil {
-			return fallback(ctx, args, transcript)
+		if first.Decision == "stop" {
+			return first
 		}
 
-		return ReviewResult{}
+		if first.Decision != "" && first.Allows() {
+			return first
+		}
+
+		if second == nil {
+			return first
+		}
+
+		opposing := second(ctx, args, transcript)
+
+		if opposing.Decision == "stop" {
+			return opposing
+		}
+
+		if opposing.Allows() {
+			return opposing
+		}
+
+		if first.Decision != "" {
+			return first
+		}
+
+		return opposing
 	}
 }
 

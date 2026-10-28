@@ -103,22 +103,49 @@ func TestDecisionReviewerRefusesWhenTheTrimIsMaterial(t *testing.T) {
 	}
 }
 
-func TestFallbackReviewerUsesTheFallbackOnlyWhenPrimaryIsSilent(t *testing.T) {
-	fallback := func(got ReviewResult) Reviewer {
-		return func(context.Context, json.RawMessage, Transcript) ReviewResult { return got }
+func TestSecondOpinionResolvesAnUnsettledDecision(t *testing.T) {
+	// A "stop" is final: the second opinion cannot overturn it.
+	stopped := func(context.Context, json.RawMessage, Transcript) ReviewResult {
+		return ReviewResult{Decision: "stop", Confidence: 0.9, Risk: "high", Authorized: false}
+	}
+	allowed := func(context.Context, json.RawMessage, Transcript) ReviewResult {
+		return ReviewResult{Decision: "allow", Confidence: 0.9, Risk: "medium", Authorized: true}
 	}
 
-	silent := func(context.Context, json.RawMessage, Transcript) ReviewResult { return ReviewResult{} }
-
-	if got := NewFallbackReviewer(silent, fallback(ReviewResult{Decision: "ask"}))(context.Background(), nil, reviewTranscript{{Role: "user", Source: "user", Text: "x"}}); got.Decision != "ask" {
-		t.Fatalf("fallback did not run: %+v", got)
+	if got := NewSecondOpinionReviewer(stopped, allowed)(context.Background(), nil, reviewTranscript{{Role: "user", Source: "user", Text: "x"}}); got.Decision != "stop" {
+		t.Fatalf("a stop was overturned: %+v", got)
 	}
 
-	primary := func(context.Context, json.RawMessage, Transcript) ReviewResult {
+	// The decision model said allow but its confidence did not clear the gate;
+	// the chat reviewer is asked and its allow settles the call.
+	unsure := func(context.Context, json.RawMessage, Transcript) ReviewResult {
+		return ReviewResult{Decision: "allow", Confidence: 0.55, Risk: "medium", Authorized: true}
+	}
+	if got := NewSecondOpinionReviewer(unsure, allowed)(context.Background(), nil, reviewTranscript{{Role: "user", Source: "user", Text: "x"}}); !got.Allows() {
+		t.Fatalf("an unsettled allow was not resolved by the second opinion: %+v", got)
+	}
+
+	// An ask is also unsettled: a decisive second allow runs the call.
+	asked := func(context.Context, json.RawMessage, Transcript) ReviewResult {
+		return ReviewResult{Decision: "ask", Confidence: 0.4, Risk: "medium", Authorized: false}
+	}
+	if got := NewSecondOpinionReviewer(asked, allowed)(context.Background(), nil, reviewTranscript{{Role: "user", Source: "user", Text: "x"}}); !got.Allows() {
+		t.Fatalf("an ask was not resolved by the second opinion: %+v", got)
+	}
+
+	// If the second opinion also declines, the call stays a question.
+	if got := NewSecondOpinionReviewer(asked, asked)(context.Background(), nil, reviewTranscript{{Role: "user", Source: "user", Text: "x"}}); got.Allows() {
+		t.Fatalf("two declined reviews allowed the call: %+v", got)
+	}
+
+	// A decisive primary allow does not spend a second request.
+	calls := 0
+	decisive := func(context.Context, json.RawMessage, Transcript) ReviewResult {
+		calls++
+
 		return ReviewResult{Decision: "allow", Confidence: 0.95, Risk: "low", Authorized: true}
 	}
-
-	if got := NewFallbackReviewer(primary, fallback(ReviewResult{Decision: "stop"}))(context.Background(), nil, reviewTranscript{{Role: "user", Source: "user", Text: "x"}}); got.Decision != "allow" {
-		t.Fatalf("fallback overrode a primary decision: %+v", got)
+	if got := NewSecondOpinionReviewer(decisive, allowed)(context.Background(), nil, reviewTranscript{{Role: "user", Source: "user", Text: "x"}}); !got.Allows() || calls != 1 {
+		t.Fatalf("a decisive answer was re-reviewed: %+v calls=%d", got, calls)
 	}
 }
