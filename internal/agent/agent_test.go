@@ -835,14 +835,14 @@ func TestAuditorStopEndsBatchAndRecordsApprovalQuestion(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := llm.Response{Message: session.Message{Role: session.RoleAssistant, Content: []session.Block{
-		session.ToolCall("a", "bash", json.RawMessage(`{"command":"rm -rf requested-output"}`)),
+		session.ToolCall("a", "bash", json.RawMessage(`{"command":"git push origin main"}`)),
 		session.ToolCall("b", "bash", json.RawMessage(`{"command":"echo after"}`)),
 	}}}
 	provider := &scripted{responses: []llm.Response{calls, calls}}
 	log := session.New(nil)
 	guard := permission.New(permission.Policy{Auto: true, ProjectCommand: func(string) bool { return false }, CommandReviewer: func(_ context.Context, _ json.RawMessage, transcript audit.Transcript) audit.ReviewResult {
 		messages := audit.HumanMessages(transcript)
-		if messages[len(messages)-1] == "Yes, delete requested-output and continue" {
+		if messages[len(messages)-1] == "Yes, publish the branch and continue" {
 			if len(audit.ApprovalRequests(transcript)) != 1 {
 				t.Fatal("approval question was lost")
 			}
@@ -871,7 +871,7 @@ func TestAuditorStopEndsBatchAndRecordsApprovalQuestion(t *testing.T) {
 	if toolResults != 2 || questions != 1 {
 		t.Fatalf("incomplete stopped batch: results=%d questions=%d", toolResults, questions)
 	}
-	if _, err = a.Run(context.Background(), "Yes, delete requested-output and continue"); err != nil {
+	if _, err = a.Run(context.Background(), "Yes, publish the branch and continue"); err != nil {
 		t.Fatal(err)
 	}
 	if executions != 2 {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -187,6 +188,17 @@ func RequiresFreshApproval(tool string, args json.RawMessage) (bool, string) {
 // later Artisan work, but cannot silently authorize `rm`, `osascript`, or an
 // unrelated executable added later in the turn.
 func ApprovalScope(tool string, args json.RawMessage) string {
+	if tool == "write" || tool == "edit" {
+		var parsed struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal(args, &parsed) == nil && strings.TrimSpace(parsed.Path) != "" {
+			return tool + ":" + filepath.Clean(parsed.Path)
+		}
+
+		return tool + ":unreadable"
+	}
+
 	if tool != "bash" {
 		return tool
 	}
@@ -240,7 +252,54 @@ func ApprovalScope(tool string, args json.RawMessage) string {
 		return "bash:empty"
 	}
 
-	return "bash:" + strings.Join(families, "+")
+	flags := rememberedFlags(strings.TrimSpace(parsed.Command))
+
+	scope := "bash:" + strings.Join(families, "+")
+	if flags != "" {
+		scope += ":flags=" + flags
+	}
+
+	return scope
+}
+
+// approvalFlags are the flags that change what a remembered family permits.
+// `npm install` and `npm install --global` share a family but not a blast
+// radius, so they must not share an "always" answer.
+var approvalFlagSet = []string{
+	"-g", "--global", "-f", "--force", "--hard", "-r", "--recursive",
+	"--delete", "-D", "-d", "--all", "-a", "--privileged", "--system",
+	"--no-verify", "--dangerously-allow-all",
+}
+
+func rememberedFlags(command string) string {
+	present := map[string]bool{}
+
+	for _, part := range splitCommands(command) {
+		for _, field := range stripWrappers(strings.Fields(part)) {
+			if !strings.HasPrefix(field, "-") {
+				continue
+			}
+
+			for _, flag := range approvalFlagSet {
+				if field == flag || strings.HasPrefix(field, flag+"=") {
+					present[flag] = true
+				}
+			}
+		}
+	}
+
+	if len(present) == 0 {
+		return ""
+	}
+
+	names := make([]string, 0, len(present))
+	for name := range present {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	return strings.Join(names, ",")
 }
 
 func firstNonFlag(values []string) string {
@@ -496,10 +555,12 @@ func splitCommands(command string) []string {
 	return parts
 }
 
-// hasWriteRedirect reports whether a command sends output to a file.
+// hasWriteRedirect reports whether a command sends output to a real file.
 //
-// `>` and `>>` write. `<` reads, and is left alone. The check ignores those
-// inside quotes, because `echo "a > b"` writes nothing.
+// `>` and `>>` write. Descriptor duplication (`2>&1`, `>&2`) writes nowhere new,
+// and /dev/null is a sink rather than a file - neither is a reason to treat
+// everyday commands such as `npm test >/dev/null 2>&1` as a fresh write.
+// Redirects inside quotes are text, not redirection.
 func hasWriteRedirect(command string) bool {
 	var quote rune
 
@@ -522,11 +583,44 @@ func hasWriteRedirect(command string) bool {
 			continue
 		}
 
-		if char == '>' {
-			// `>&2` and `> /dev/null` are still redirects; 2>&1 is a descriptor
-			// copy, which writes nowhere new.
+		if char != '>' {
+			continue
+		}
+
+		// Skip a second '>' for append, then any spaces before the target.
+		next := i + 1
+		if next < len(runes) && runes[next] == '>' {
+			next++
+		}
+
+		for next < len(runes) && (runes[next] == ' ' || runes[next] == '\t') {
+			next++
+		}
+
+		if next >= len(runes) {
 			return true
 		}
+
+		// `>&2` / `2>&1` duplicate a descriptor.
+		if runes[next] == '&' {
+			i = next
+
+			continue
+		}
+
+		start := next
+		for next < len(runes) && !strings.ContainsRune(" \t;|&()\n", runes[next]) {
+			next++
+		}
+
+		target := string(runes[start:next])
+		if target == "" || target == "/dev/null" {
+			i = next - 1
+
+			continue
+		}
+
+		return true
 	}
 
 	return false

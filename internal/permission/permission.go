@@ -63,6 +63,10 @@ type Request struct {
 	// own provenance rule to the turns it is given, and keeps only those a
 	// person authored.
 	Transcript audit.Transcript
+
+	// ApprovalScope names what "always" would cover. It is carried to the
+	// interface so a person can see the reach of the decision they are making.
+	ApprovalScope string
 }
 
 // ArgumentsPreview renders the call's arguments for a prompt, bounded so a large
@@ -113,8 +117,13 @@ type Policy struct {
 	// asking.
 	Auto bool
 
-	// CommandReviewer is an isolated, tool-free second opinion for commands
-	// not covered by deterministic project rules.
+	// Workspace is the folder the turn is allowed to change. Auto mode uses it
+	// to distinguish an ordinary project edit from a write somewhere else.
+	Workspace string
+
+	// CommandReviewer is an isolated, tool-free second opinion. It is consulted
+	// only when the deterministic auto policy cannot establish a call's safety -
+	// destructive commands, opaque shell, or commands outside the workspace.
 	CommandReviewer func(context.Context, json.RawMessage, audit.Transcript) audit.ReviewResult
 
 	// ProjectCommand evaluates literal commands against the assigned workspace.
@@ -139,50 +148,72 @@ func (p Policy) Effect(req Request) Effect {
 // than only its outcome. An approval nobody can explain is one nobody can
 // correct.
 func (p Policy) Decide(req Request) (Effect, string) {
+	effect, reason, _, _ := p.decide(req)
+
+	return effect, reason
+}
+
+// decide is Decide with the extra facts the guard needs: whether an isolated
+// review should run before a person is troubled, and whether a failed review
+// must end as a refusal rather than a question. That review is the second
+// opinion for a call the deterministic policy could not establish, never a
+// substitute for the safety floor.
+func (p Policy) decide(req Request) (Effect, string, bool, bool) {
 	// Reading is always safe to run unattended, in every mode. Plan mode is
 	// about mutation, not about paralysis.
 	if req.ReadOnly {
-		return Allow, "reads only"
+		return Allow, "reads only", false, false
 	}
 
 	if p.PlanMode {
-		return Deny, "plan mode refuses anything that changes the workspace"
+		return Deny, "plan mode refuses anything that changes the workspace", false, false
 	}
 
-	if p.Auto {
-		// The auditor sees the call and nothing else. It cannot be told that
-		// something was already agreed, which is the whole reason it is not the
-		// model: a context that has been talked into something talks its
-		// auditor into it too.
-		decision := audit.Assess(req.Tool, req.Arguments, req.Transcript)
-
-		// Bash containing credentials still receives an authorization review when
-		// available. The reviewer redacts credential values before making its call.
-		if decision.RefusedNow() {
-			if req.Tool == "bash" && p.CommandReviewer != nil {
-				return Ask, decision.Explain()
-			}
-			return Deny, decision.Explain()
-		}
-		if req.Tool == "bash" && p.ProjectCommand != nil {
-			var input struct {
-				Command string `json:"command"`
-			}
-			if json.Unmarshal(req.Arguments, &input) == nil && p.ProjectCommand(input.Command) {
-				return Allow, "audited project command within the assigned workspace"
-			}
-			return Ask, "the command’s scope or effects require review"
-		}
-		if decision.Allowed() {
-			return Allow, "audited: " + decision.Explain()
-		}
-
-		// A risky verdict is not a refusal. It means a person decides, which is
-		// what happens without auto mode at all.
-		return Ask, "needs review: " + decision.Explain()
+	// Without auto mode this is the person-watched default: mutation asks.
+	if !p.Auto {
+		return Ask, "", false, false
 	}
 
-	return Ask, ""
+	verdict := audit.AssessAuto(req.Tool, req.Arguments, req.Transcript, p.Workspace)
+
+	if verdict.RefusedNow() {
+		// A credential bound for something that can reach the network is
+		// refused unless an isolated review can establish that the person
+		// explicitly asked for this exact action. Otherwise there is no safe
+		// question to ask.
+		if req.Tool == "bash" && p.CommandReviewer != nil {
+			// The review may establish that the person explicitly asked for this
+			// exact destination. If it cannot, the answer is refusal: asking
+			// "may I send your key?" is a question whose only safe answer is no.
+			return Ask, verdict.Explain(), true, true
+		}
+
+		return Deny, verdict.Explain(), false, false
+	}
+
+	if verdict.Allowed() {
+		return Allow, "auto: " + verdict.Explain(), false, false
+	}
+
+	// A project-specific rule can allow a command the general policy leaves
+	// uncertain - but it cannot reach past the floor above.
+	if req.Tool == "bash" && p.ProjectCommand != nil {
+		var input struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(req.Arguments, &input) == nil &&
+			strings.TrimSpace(input.Command) != "" &&
+			p.ProjectCommand(input.Command) {
+			return Allow, "audited project command within the assigned workspace", false, false
+		}
+	}
+
+	reason := verdict.Explain()
+	if reason == "" {
+		reason = "auto mode could not establish this call's effects"
+	}
+
+	return Ask, reason, verdict.Review, verdict.ReviewDecides
 }
 
 // Prompter asks a person to decide. It is an interface so the shell can supply
@@ -266,7 +297,7 @@ func (g *Guard) Permit(ctx context.Context, tool string, args json.RawMessage, r
 	approvalScope := audit.ApprovalScope(tool, args)
 	req := Request{
 		Tool: tool, Arguments: args, ReadOnly: readOnly, Transcript: transcript,
-		OneTimeOnly: oneTimeOnly, RiskReason: riskReason,
+		OneTimeOnly: oneTimeOnly, RiskReason: riskReason, ApprovalScope: approvalScope,
 	}
 
 	g.mu.Lock()
@@ -277,9 +308,11 @@ func (g *Guard) Permit(ctx context.Context, tool string, args json.RawMessage, r
 
 	// A remembered decision short-circuits the policy, except that plan mode
 	// still wins: a session approval given in normal mode must not let a write
-	// through while the user believes they are planning.
+	// through while the user believes they are planning. Auto mode uses the same
+	// memory - approving a command family once must mean once, not once per
+	// step.
 	if !policy.PlanMode {
-		if rememberedAllow && !req.OneTimeOnly && !(policy.Auto && (policy.ProjectCommand != nil || policy.CommandReviewer != nil) && tool == "bash") {
+		if rememberedAllow && !req.OneTimeOnly {
 			g.record(Outcome{Effect: Allow, Reason: "approved earlier in this session"})
 			return "", nil
 		}
@@ -289,36 +322,63 @@ func (g *Guard) Permit(ctx context.Context, tool string, args json.RawMessage, r
 		}
 	}
 
-	effect, reason := policy.Decide(req)
-	if effect == Ask && policy.Auto && !policy.PlanMode && tool == "bash" && policy.CommandReviewer != nil {
+	effect, reason, review, hard := policy.decide(req)
+
+	// The isolated reviewer is the second opinion for a call the deterministic
+	// policy could not establish. It never overrides the floor on its own: a
+	// refusal above has already returned without reaching this block.
+	if effect == Ask && review && tool == "bash" && policy.CommandReviewer != nil {
 		result := policy.CommandReviewer(ctx, args, transcript)
-		if result.Decision == "stop" {
-			if err := ctx.Err(); err != nil {
-				return "", err
-			}
-			g.record(Outcome{Effect: Deny, Reason: "Cenmax AI command auditor stopped for explicit user approval"})
-			return "", audit.RequireApproval(args, result.ReviewedWorkspace)
+		if err := ctx.Err(); err != nil {
+			return "", err
 		}
+
 		if result.Allows() {
-			effect, reason = Allow, "Cenmax AI command auditor approved: effects and scope match the user request"
+			effect = Allow
+			reason = "independent review approved: effects and scope match the request"
+		} else if hard {
+			// A refused class of action (credentials bound for the network) is
+			// never turned into a prompt. The refusal is the control.
+			effect = Deny
+			reason = "independent review declined: " + reviewExplanation(result, reason)
 		} else {
-			reason = "Cenmax AI command auditor needs confirmation: authorization, scope, or effects are uncertain"
+			reason = "independent review needs confirmation: " + reviewExplanation(result, reason)
+			req.RiskReason = reason
+			if result.Decision == "stop" || req.OneTimeOnly {
+				req.OneTimeOnly = true
+			}
+
+			// A headless caller has no channel to ask on. For a stopped review
+			// the turn-ending approval request is still the only way to carry the
+			// question, which is what a one-shot CLI consumes.
+			if g.prompter == nil && result.Decision == "stop" {
+				g.record(Outcome{Effect: Deny, Reason: "Cenmax AI command reviewer stopped for explicit user approval"})
+				return "", audit.RequireApproval(args, result.ReviewedWorkspace)
+			}
 		}
-		req.OneTimeOnly = true
-		req.RiskReason = reason
-	}
-	if err := ctx.Err(); err != nil {
-		return "", err
 	}
 
-	switch effect {
-	case Allow:
+	if effect == Ask && hard {
+		// The isolated review settles this class of call. Without one, or when
+		// it could not establish the action, the safe answer is refusal - not a
+		// question. This is what keeps workspace clean-up from interrupting a
+		// person while never running an unjustified deletion.
+		if reason == "" {
+			reason = "auto mode could not establish that this action was requested"
+		}
+		effect = Deny
+		g.record(Outcome{Effect: Deny, Reason: reason})
+		return denial(tool, reason), nil
+	}
+
+	if effect == Allow {
 		// The reason is recorded, not discarded. "Allowed" with no explanation
 		// is indistinguishable from a bug in the policy.
 		g.record(Outcome{Effect: Allow, Reason: reason})
 		return "", nil
+	}
 
-	case Deny:
+	if effect == Deny {
 		if reason == "" {
 			reason = "policy refused this tool call"
 		}
@@ -333,6 +393,11 @@ func (g *Guard) Permit(ctx context.Context, tool string, args json.RawMessage, r
 		reason := "no approval channel is available"
 		g.record(Outcome{Effect: Deny, Reason: reason})
 		return denial(tool, reason), nil
+	}
+
+	// Make sure the interface can always explain the question.
+	if req.RiskReason == "" {
+		req.RiskReason = reason
 	}
 
 	approved, always, err := g.prompter.Ask(ctx, req)
@@ -357,6 +422,16 @@ func (g *Guard) Permit(ctx context.Context, tool string, args json.RawMessage, r
 	}
 
 	return denial(tool, "the user declined this call"), nil
+}
+
+// reviewExplanation prefers the reviewer's own risk description when it has
+// one, and otherwise falls back to the deterministic reason.
+func reviewExplanation(result audit.ReviewResult, fallback string) string {
+	if strings.TrimSpace(result.Risk) != "" && result.Risk != "low" {
+		return result.Risk + " risk; " + fallback
+	}
+
+	return fallback
 }
 
 // Decisions returns a copy of every decision made, in order.

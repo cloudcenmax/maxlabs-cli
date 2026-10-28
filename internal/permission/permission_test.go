@@ -124,7 +124,7 @@ func TestBashSessionApprovalDoesNotCoverDestructiveCommands(t *testing.T) {
 	p := &prompter{approved: true, always: true}
 	g := permission.New(permission.Policy{Auto: true}, p)
 
-	ordinary := args(`{"command":"php artisan test"}`)
+	ordinary := args(`{"command":"npm install"}`)
 	if denied, err := g.Permit(context.Background(), "bash", ordinary, false, nil); err != nil || denied != "" {
 		t.Fatalf("ordinary Bash approval failed: denied=%q err=%v", denied, err)
 	}
@@ -135,7 +135,7 @@ func TestBashSessionApprovalDoesNotCoverDestructiveCommands(t *testing.T) {
 		t.Fatalf("ordinary Bash approval was not reused; prompts=%d", len(p.asked))
 	}
 
-	destructive := args(`{"command":"cd gateway && rm -rf storage/tmp"}`)
+	destructive := args(`{"command":"git push origin main"}`)
 	for i := 0; i < 2; i++ {
 		if denied, err := g.Permit(context.Background(), "bash", destructive, false, nil); err != nil || denied != "" {
 			t.Fatalf("fresh destructive approval failed: denied=%q err=%v", denied, err)
